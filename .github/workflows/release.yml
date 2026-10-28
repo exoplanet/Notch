@@ -12,13 +12,17 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Publish the APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           shopt -s nullglob
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists."
+            exit 0
+          fi
           apks=(dist/*.apk)
           if [ "${#apks[@]}" -eq 0 ]; then
             echo "No APK under dist/"
