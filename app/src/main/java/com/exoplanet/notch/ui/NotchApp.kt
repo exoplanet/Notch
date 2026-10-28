@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,6 +64,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import java.util.Locale
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -193,21 +197,23 @@ fun NotchApp() {
         ) {
             Text("Notch", style = MaterialTheme.typography.headlineLarge, color = Ink)
             Text(
-                "Four notches. Each one removes its frequency completely.",
+                "Each one removes its frequency completely. Octaves set each center's hertz width.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Muted,
             )
             NumberRow(
                 label = "Width",
-                value = settings.bandwidthHz,
-                min = NotchSettings.MIN_BANDWIDTH_HZ,
-                max = NotchSettings.MAX_BANDWIDTH_HZ,
-                maxDigits = 3,
+                value = settings.bandwidthTenths,
+                min = NotchSettings.MIN_BANDWIDTH_TENTHS,
+                max = NotchSettings.MAX_BANDWIDTH_TENTHS,
+                maxDigits = 4,
+                decimalPlaces = 1,
                 showUnit = true,
+                unit = "oct",
                 accelerate = false,
                 onValue = { next ->
                     val latest = NotchEngine.current()
-                    if (latest.bandwidthHz != next) push(latest.copy(bandwidthHz = next))
+                    if (latest.bandwidthTenths != next) push(latest.copy(bandwidthTenths = next))
                 },
             )
             Row(
@@ -248,7 +254,12 @@ fun NotchApp() {
                 )
             }
             Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
                     onClick = {
                         val current = player ?: return@Button
@@ -260,11 +271,24 @@ fun NotchApp() {
                         current.play()
                     },
                     enabled = player != null,
-                ) { Text("Play test noise") }
+                    modifier = Modifier.weight(1.35f),
+                    contentPadding = buttonPadding,
+                ) { Text("Play test noise", textAlign = TextAlign.Center, maxLines = 2) }
                 Button(
                     onClick = { openAudio.launch(arrayOf("audio/*")) },
                     enabled = player != null,
-                ) { Text("Open audio") }
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Open audio", textAlign = TextAlign.Center, maxLines = 2) }
+                Button(
+                    onClick = {
+                        val current = player ?: return@Button
+                        if (current.isPlaying) current.pause() else current.play()
+                    },
+                    enabled = player != null && durationMs > 0L,
+                    modifier = Modifier.weight(0.75f),
+                    contentPadding = buttonPadding,
+                ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
             }
             Text(clipName, color = Muted)
             if (durationMs > 0L) {
@@ -283,13 +307,6 @@ fun NotchApp() {
                     valueRange = 0f..durationMs.toFloat(),
                 )
             }
-            Button(
-                onClick = {
-                    val current = player ?: return@Button
-                    if (current.isPlaying) current.pause() else current.play()
-                },
-                enabled = player != null && durationMs > 0L,
-            ) { Text(if (isPlaying) "Pause" else "Play") }
             errorText?.let { Text(it, color = Amber) }
         }
     }
@@ -304,31 +321,34 @@ private fun NumberRow(
     onValue: (Int) -> Unit,
     label: String? = null,
     showUnit: Boolean = false,
+    unit: String = "Hz",
+    decimalPlaces: Int = 0,
     accelerate: Boolean = true,
     enabled: Boolean? = null,
     onEnabled: ((Boolean) -> Unit)? = null,
 ) {
-    val draft = remember { mutableStateOf(value.toString()) }
+    fun show(stored: Int) = formatAmount(stored, decimalPlaces)
+    val draft = remember { mutableStateOf(show(value)) }
     val focused = remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val applyLatest by rememberUpdatedState(onValue)
     val currentValue by rememberUpdatedState(value)
 
     LaunchedEffect(value) {
-        if (!focused.value) draft.value = value.toString()
+        if (!focused.value) draft.value = show(value)
     }
 
     fun commit() {
-        val parsed = draft.value.toIntOrNull()
+        val parsed = parseAmount(draft.value, decimalPlaces)
         val clamped = (parsed ?: currentValue).coerceIn(min, max)
-        draft.value = clamped.toString()
+        draft.value = show(clamped)
         if (clamped != currentValue) applyLatest(clamped)
     }
 
     fun step(delta: Int) {
-        val base = draft.value.toIntOrNull() ?: currentValue
+        val base = parseAmount(draft.value, decimalPlaces) ?: currentValue
         val clamped = (base + delta).coerceIn(min, max)
-        draft.value = clamped.toString()
+        draft.value = show(clamped)
         if (clamped != currentValue) applyLatest(clamped)
     }
 
@@ -363,7 +383,7 @@ private fun NumberRow(
             BasicTextField(
                 value = draft.value,
                 onValueChange = { raw ->
-                    draft.value = raw.filter { it.isDigit() }.take(maxDigits)
+                    draft.value = sanitizeAmount(raw, maxDigits, decimalPlaces)
                 },
                 singleLine = true,
                 textStyle = TextStyle(
@@ -372,7 +392,7 @@ private fun NumberRow(
                     textAlign = TextAlign.Center,
                 ),
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
+                    keyboardType = if (decimalPlaces > 0) KeyboardType.Decimal else KeyboardType.Number,
                     imeAction = ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(
@@ -391,7 +411,7 @@ private fun NumberRow(
                     },
             )
             if (showUnit) {
-                Text("Hz", color = Muted)
+                Text(unit, color = Muted)
             }
         }
         StepButton("+", onStep = { step(it) }, accelerate = accelerate)
@@ -439,6 +459,35 @@ private fun StepButton(label: String, onStep: (Int) -> Unit, accelerate: Boolean
     ) {
         Text(label, color = Teal, style = MaterialTheme.typography.titleLarge)
     }
+}
+
+private fun formatAmount(stored: Int, decimalPlaces: Int): String {
+    if (decimalPlaces <= 0) return stored.toString()
+    val scale = 10.0.pow(decimalPlaces)
+    return String.format(Locale.US, "%.${decimalPlaces}f", stored / scale)
+}
+
+private fun parseAmount(text: String, decimalPlaces: Int): Int? {
+    if (decimalPlaces <= 0) return text.toIntOrNull()
+    val number = text.toDoubleOrNull() ?: return null
+    return (number * 10.0.pow(decimalPlaces)).roundToInt()
+}
+
+private fun sanitizeAmount(raw: String, maxDigits: Int, decimalPlaces: Int): String {
+    if (decimalPlaces <= 0) return raw.filter { it.isDigit() }.take(maxDigits)
+    val cleaned = buildString {
+        var dotted = false
+        for (ch in raw) {
+            when {
+                ch.isDigit() -> append(ch)
+                ch == '.' && !dotted -> {
+                    dotted = true
+                    append(ch)
+                }
+            }
+        }
+    }
+    return cleaned.take(maxDigits)
 }
 
 private fun List<NotchBand>.replace(index: Int, band: NotchBand): List<NotchBand> {

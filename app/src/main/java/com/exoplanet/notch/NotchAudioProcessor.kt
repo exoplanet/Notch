@@ -55,7 +55,7 @@ class NotchAudioProcessor : BaseAudioProcessor() {
             targets[index] = if (band == null) {
                 BiquadCoefficients.IDENTITY
             } else {
-                BiquadCoefficients.forBand(sampleRate, band, settings.bandwidthHz)
+                BiquadCoefficients.forBand(sampleRate, band, settings.bandwidthTenths)
             }
         }
         val frames = inputBuffer.remaining() / bytesPerFrame

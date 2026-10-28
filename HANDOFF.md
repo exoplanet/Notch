@@ -12,14 +12,14 @@ A normal app on a stock S23 cannot insert a real notch into every other app's au
 
 - Package `com.exoplanet.notch`.
 - Open an audio file, or play a looping built-in test noise.
-- Four notches, all off at launch, under a “Center Frequency Hz” header centered on the frequency column. Frequencies start at 1, 2, 4, and 10 kHz. Each has a round on/off button, and more than one can be on. Frequency and width can be typed or stepped with − and + (frequency 500 Hz–10 kHz; holding steps faster). The frequency fields do not repeat the Hz unit.
-- Width starts at 50 Hz and accepts 5–100 Hz.
+- Four notches, all off on a first launch, under a “Center Frequency Hz” header centered on the frequency column. Frequencies start at 1, 2, 4, and 10 kHz. Width, on/off, and center frequencies are saved and restored on the next start. Each has a round on/off button, and more than one can be on. Frequency and width can be typed or stepped with − and + (frequency 500 Hz–10 kHz; holding steps faster). The frequency fields do not repeat the Hz unit.
+- Width starts at 0.1 octave and accepts 0.1–1.0 octave, in steps of 0.1. Each notch converts that fraction into hertz from its own center.
 - Each enabled notch removes its center frequency completely. There is no depth control and no response graph.
 - Background playback through a media notification. The notches apply only to sound this app plays.
 
 ## Filter
 
-Four cascaded Robert Bristow-Johnson notches. The center is a zero. Width is the approximate −3 dB bandwidth in hertz. A disabled notch is an identity filter. Coefficients ramp over about 20 ms.
+Four cascaded Robert Bristow-Johnson notches. The center is a zero. The shared width is a fraction of an octave. The hertz bandwidth of a notch is center × (2^(octaves/2) − 2^(−octaves/2)), which is the approximate −3 dB width. A disabled notch is an identity filter. Coefficients ramp over about 20 ms.
 
 ## Player wiring
 
@@ -40,7 +40,7 @@ Ubuntu 26.04 on the development VM. About 5.2 GB RAM. No `/dev/kvm`. `sudo` asks
 - AGP 9 compiles Kotlin itself. Do not apply `org.jetbrains.kotlin.android`. Do apply `org.jetbrains.kotlin.plugin.compose`.
 - minSdk 26, targetSdk 36. Google Play requires target 36 for a new app as of August 31, 2026.
 - Play upload bundle: `app/build/outputs/bundle/release/app-release.aab` after `./gradlew :app:bundleRelease`. The upload keystore is `keystore/notch-upload.jks`, described by `keystore.properties`. Both are gitignored. Back them up. Losing the upload key blocks updates unless Play App Signing can reset it.
-- Signed release APK: `app/build/outputs/apk/release/app-release.apk` after `./gradlew :app:assembleRelease`. Tag `v1.0` publishes `dist/notch-1.0.apk` through `.github/workflows/release.yml`.
+- Signed release APK: `app/build/outputs/apk/release/app-release.apk` after `./gradlew :app:assembleRelease`. Tag `v1.1` publishes `dist/notch-1.1.apk` through `.github/workflows/release.yml`. Version name 1.1, version code 2.
 - Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
 Rebuild:

@@ -3,6 +3,7 @@ package com.exoplanet.notch.dsp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.sin
 
 data class NotchBand(
@@ -11,32 +12,54 @@ data class NotchBand(
 )
 
 /**
- * Four independent notches. [bandwidthHz] is the approximate width of each cut.
- * An enabled notch removes its center frequency completely.
+ * Four independent notches. [bandwidthTenths] is the shared width in tenths of an octave
+ * (1 is 0.1 octave, 10 is 1.0 octave). Each notch converts that fraction into hertz
+ * from its own center. An enabled notch removes its center frequency completely.
  */
 data class NotchSettings(
-    val bandwidthHz: Int = DEFAULT_BANDWIDTH_HZ,
+    val bandwidthTenths: Int = DEFAULT_BANDWIDTH_TENTHS,
     val bands: List<NotchBand> = DEFAULT_BANDS,
 ) {
     companion object {
         const val COUNT = 4
         const val MIN_HZ = 500
         const val MAX_HZ = 10_000
-        const val MIN_BANDWIDTH_HZ = 5
-        const val MAX_BANDWIDTH_HZ = 100
-        const val DEFAULT_BANDWIDTH_HZ = 50
+        const val MIN_BANDWIDTH_TENTHS = 1
+        const val MAX_BANDWIDTH_TENTHS = 10
+        const val DEFAULT_BANDWIDTH_TENTHS = 1
+
         val DEFAULT_BANDS: List<NotchBand> = listOf(
             NotchBand(frequencyHz = 1_000),
             NotchBand(frequencyHz = 2_000),
             NotchBand(frequencyHz = 4_000),
             NotchBand(frequencyHz = 10_000),
         )
+
+        /**
+         * Hertz between the geometric edges of [octaveTenths] / 10 octaves around [frequencyHz].
+         * A tenth of an octave at 1 kHz is about 69 Hz; the same fraction at 10 kHz is about 693 Hz.
+         */
+        fun bandwidthHz(frequencyHz: Double, octaveTenths: Int): Double {
+            val octaves = octaveTenths.coerceIn(MIN_BANDWIDTH_TENTHS, MAX_BANDWIDTH_TENTHS) / 10.0
+            val half = octaves / 2.0
+            return frequencyHz * (2.0.pow(half) - 2.0.pow(-half))
+        }
+    }
+
+    /** Clamps the width and each center into the ranges the controls allow. */
+    fun normalized(): NotchSettings {
+        val tenths = bandwidthTenths.coerceIn(MIN_BANDWIDTH_TENTHS, MAX_BANDWIDTH_TENTHS)
+        val normalizedBands = List(COUNT) { index ->
+            val band = bands.getOrNull(index) ?: DEFAULT_BANDS[index]
+            band.copy(frequencyHz = band.frequencyHz.coerceIn(MIN_HZ, MAX_HZ))
+        }
+        return copy(bandwidthTenths = tenths, bands = normalizedBands)
     }
 }
 
 /**
  * Robert Bristow-Johnson notch. The center frequency is a zero, so the cut is complete there.
- * [NotchSettings.bandwidthHz] is the approximate width between the −3 dB points.
+ * [bandwidthHz] is the approximate width between the −3 dB points.
  */
 data class BiquadCoefficients(
     val b0: Double,
@@ -48,9 +71,10 @@ data class BiquadCoefficients(
     companion object {
         val IDENTITY = BiquadCoefficients(1.0, 0.0, 0.0, 0.0, 0.0)
 
-        fun forBand(sampleRate: Int, band: NotchBand, bandwidthHz: Int): BiquadCoefficients {
+        fun forBand(sampleRate: Int, band: NotchBand, bandwidthTenths: Int): BiquadCoefficients {
             if (!band.enabled || sampleRate <= 0) return IDENTITY
-            return notch(sampleRate, band.frequencyHz.toDouble(), bandwidthHz.toDouble())
+            val bandwidth = NotchSettings.bandwidthHz(band.frequencyHz.toDouble(), bandwidthTenths)
+            return notch(sampleRate, band.frequencyHz.toDouble(), bandwidth)
         }
 
         fun notch(sampleRate: Int, frequencyHz: Double, bandwidthHz: Double): BiquadCoefficients {
