@@ -40,7 +40,7 @@ Ubuntu 26.04 on the development VM. About 5.2 GB RAM. No `/dev/kvm`. `sudo` asks
 - AGP 9 compiles Kotlin itself. Do not apply `org.jetbrains.kotlin.android`. Do apply `org.jetbrains.kotlin.plugin.compose`.
 - minSdk 26, targetSdk 36. Google Play requires target 36 for a new app as of August 31, 2026.
 - Play upload bundle: `app/build/outputs/bundle/release/app-release.aab` after `./gradlew :app:bundleRelease`. The upload keystore is `keystore/notch-upload.jks`, described by `keystore.properties`. Both are gitignored. Back them up. Losing the upload key blocks updates unless Play App Signing can reset it.
-- Signed release APK: `app/build/outputs/apk/release/app-release.apk` after `./gradlew :app:assembleRelease`. Tag `v1.1` publishes `dist/notch-1.1.apk` through `.github/workflows/release.yml`. Version name 1.1, version code 2.
+- Signed release APK: `app/build/outputs/apk/release/app-release.apk` after `./gradlew :app:assembleRelease`. Tag `v1.2` publishes `dist/notch-1.2.apk` through `.github/workflows/release.yml`. Version name 1.2, version code 3.
 - Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
 Rebuild:

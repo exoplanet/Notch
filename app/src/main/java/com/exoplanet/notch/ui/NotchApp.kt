@@ -8,9 +8,11 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,12 +34,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -82,27 +88,51 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-private val Ink = Color(0xFFE6E1E5)
-private val Muted = Color(0xFFC4C6CF)
-private val Teal = Color(0xFF7EE0C6)
-private val Amber = Color(0xFFE7C07A)
-private val Background = Color(0xFF101418)
-private val Panel = Color(0xFF1A2128)
+internal val Ink: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE6E1E5) else Color(0xFF1A1C1E)
+
+internal val Muted: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFC4C6CF) else Color(0xFF5C656E)
+
+internal val Teal: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF7EE0C6) else Color(0xFF0E6B5C)
+
+private val Amber: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE7C07A) else Color(0xFF8A4E00)
+
+private val Background: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF101418) else Color(0xFFE7EEEC)
+
+internal val Panel: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1A2128) else Color(0xFFFFFFFF)
+
+private val OnPrimary: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF00382E) else Color(0xFFFFFFFF)
 
 @Composable
 fun NotchTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
+    val scheme = if (isSystemInDarkTheme()) {
+        darkColorScheme(
             background = Background,
             surface = Background,
             primary = Teal,
-            onPrimary = Color(0xFF00382E),
+            onPrimary = OnPrimary,
             secondary = Amber,
             onSurface = Ink,
             onSurfaceVariant = Muted,
-        ),
-        content = content,
-    )
+        )
+    } else {
+        lightColorScheme(
+            background = Background,
+            surface = Background,
+            primary = Teal,
+            onPrimary = OnPrimary,
+            secondary = Amber,
+            onSurface = Ink,
+            onSurfaceVariant = Muted,
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @Composable
@@ -117,6 +147,9 @@ fun NotchApp() {
     var scrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableLongStateOf(0L) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var page by remember { mutableStateOf(AppPage.Player) }
+    var menuOpen by remember { mutableStateOf(false) }
+    BackHandler(enabled = page != AppPage.Player) { page = AppPage.Player }
 
     DisposableEffect(context) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -186,6 +219,14 @@ fun NotchApp() {
     }
 
     Scaffold(containerColor = Background) { padding ->
+        if (page != AppPage.Player) {
+            AppPageScreen(
+                page = page,
+                onBack = { page = AppPage.Player },
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -195,7 +236,47 @@ fun NotchApp() {
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Notch", style = MaterialTheme.typography.headlineLarge, color = Ink)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Notch",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Ink,
+                )
+                Box {
+                    TextButton(onClick = { menuOpen = true }) { Text("Menu") }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = Panel,
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Guide") },
+                            onClick = {
+                                menuOpen = false
+                                page = AppPage.Guide
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("About") },
+                            onClick = {
+                                menuOpen = false
+                                page = AppPage.About
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Update") },
+                            onClick = {
+                                menuOpen = false
+                                page = AppPage.Update
+                            },
+                        )
+                    }
+                }
+            }
             Text(
                 "Each one removes its frequency completely. Octaves set each center's hertz width.",
                 style = MaterialTheme.typography.bodyMedium,
