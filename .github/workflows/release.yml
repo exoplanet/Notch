@@ -1,0 +1,30 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          shopt -s nullglob
+          apks=(dist/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "No APK under dist/"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" "${apks[@]}" \
+            --title "Notch ${version}" \
+            --notes-file dist/RELEASE_NOTES.md

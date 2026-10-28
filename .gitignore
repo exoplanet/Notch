@@ -7,4 +7,8 @@
 .DS_Store
 captures/
 *.apk
+!dist/*.apk
 *.aab
+keystore.properties
+*.jks
+*.keystore
