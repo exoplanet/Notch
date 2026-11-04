@@ -69,6 +69,11 @@ kotlin {
 }
 
 dependencies {
+    constraints {
+        implementation("com.google.guava:guava:33.7.2-android") {
+            because("CVE-2026-102554 is fixed in 33.7.2. Media3 1.11.1 brings 33.3.1-android.")
+        }
+    }
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
