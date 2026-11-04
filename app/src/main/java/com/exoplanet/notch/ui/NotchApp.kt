@@ -186,7 +186,7 @@ fun NotchApp() {
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener(
             { player = runCatching { future.get() }.getOrNull() },
-            context.mainExecutor,
+            ContextCompat.getMainExecutor(context),
         )
         onDispose { MediaController.releaseFuture(future) }
     }
