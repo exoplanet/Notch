@@ -69,21 +69,44 @@ class PlaylistStoreTest {
     }
 
     @Test
-    fun successfulScanReplacesTheCacheInDiscOrder() {
+    fun successfulScanKeepsAMissingTrackFlaggedInDiscOrder() {
         val album = PlaylistEntry.Album(
             id = "album",
             treeUri = "content://tree",
             title = "Night",
-            tracks = listOf(track("content://old-cache", "Cached", disc = 1, number = 1)),
+            tracks = listOf(
+                track("content://kept", "Kept", disc = 1, number = 1),
+                track("content://gone", "Gone", disc = 1, number = 2),
+                track("content://old-last", "Old last", disc = 2, number = 1),
+            ),
         )
         val scanned = listOf(
-            track("content://new", "New", disc = 1, number = 2),
+            track("content://new", "New", disc = 1, number = 3),
             track("content://kept", "Kept", disc = 1, number = 1),
         )
         val loaded = PlaylistRefresh.refresh(listOf(album), scan = { AlbumScanResult.Ok(scanned) }) { true }
         val result = loaded.single() as PlaylistEntry.Album
-        assertEquals(listOf("Kept", "New"), result.tracks.map { it.title })
+        assertEquals(listOf("Kept", "Gone", "New", "Old last"), result.tracks.map { it.title })
+        assertEquals(listOf(false, true, false, true), result.tracks.map { it.unavailable })
         assertEquals(listOf("Kept", "New"), Playlist(loaded).flatten().map { it.title })
+    }
+
+    @Test
+    fun emptySuccessfulScanFlagsEveryCachedTrack() {
+        val album = PlaylistEntry.Album(
+            id = "album",
+            treeUri = "content://tree",
+            title = "Night",
+            tracks = listOf(
+                track("content://t1", "One", disc = 1, number = 1),
+                track("content://t2", "Two", disc = 1, number = 2),
+            ),
+        )
+        val loaded = PlaylistRefresh.refresh(listOf(album), scan = { AlbumScanResult.Ok(emptyList()) }) { true }
+        val result = loaded.single() as PlaylistEntry.Album
+        assertEquals(listOf("content://t1", "content://t2"), result.tracks.map { it.uri })
+        assertTrue(result.tracks.all { it.unavailable })
+        assertTrue(Playlist(loaded).flatten().isEmpty())
     }
 
     @Test

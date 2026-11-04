@@ -139,13 +139,25 @@ internal object PlaylistRefresh {
         canRead: (String) -> Boolean,
     ): PlaylistEntry.Album {
         val base = when (scan) {
-            is AlbumScanResult.Ok -> AlbumOrder.sort(scan.tracks)
+            is AlbumScanResult.Ok -> mergeScan(entry.tracks, scan.tracks)
             AlbumScanResult.Failed -> entry.tracks
         }
+        val present = (scan as? AlbumScanResult.Ok)?.tracks?.map { it.uri }?.toSet()
         val marked = base.map { track ->
-            track.copy(unavailable = !readable(track.uri, canRead))
+            val missingFromScan = present != null && track.uri !in present
+            track.copy(unavailable = missingFromScan || !readable(track.uri, canRead))
         }
         return entry.copy(tracks = marked)
+    }
+
+    /**
+     * A file that was saved and is no longer in the folder stays in the list so the
+     * queue can flag it. Fresh scan metadata wins when the same uri is still present.
+     */
+    private fun mergeScan(cached: List<AlbumTrack>, scanned: List<AlbumTrack>): List<AlbumTrack> {
+        val seen = scanned.map { it.uri }.toSet()
+        val missing = cached.filter { it.uri.isNotBlank() && it.uri !in seen }.distinctBy { it.uri }
+        return AlbumOrder.sort(scanned + missing)
     }
 
     private fun scanTree(treeUri: String, scan: (String) -> AlbumScanResult): AlbumScanResult {

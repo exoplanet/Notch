@@ -1,6 +1,8 @@
 package com.exoplanet.notch
 
+import android.util.Log
 import androidx.media3.common.C
+import androidx.media3.common.Timeline
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import com.exoplanet.notch.dsp.BiquadCoefficients
@@ -38,6 +40,11 @@ class NotchAudioProcessor : BaseAudioProcessor() {
             coeffs[3] = 0.0
             coeffs[4] = 0.0
         }
+        Log.i(
+            TAG,
+            "NotchAudioProcessor active on ${streamLabel(streamMetadata)} " +
+                "${inputAudioFormat.sampleRate} Hz ${inputAudioFormat.channelCount} ch",
+        )
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -96,9 +103,28 @@ class NotchAudioProcessor : BaseAudioProcessor() {
         output.flip()
     }
 
+    private fun streamLabel(metadata: AudioProcessor.StreamMetadata): String {
+        val uid = metadata.periodUid ?: return "unknown item"
+        val timeline = metadata.timeline
+        if (timeline.isEmpty) return "unknown item"
+        return try {
+            val period = timeline.getPeriodByUid(uid, Timeline.Period())
+            val item = timeline.getWindow(period.windowIndex, Timeline.Window()).mediaItem
+            item.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+                ?: item.mediaId.takeIf { it.isNotBlank() }
+                ?: "item ${period.windowIndex}"
+        } catch (_: Exception) {
+            "unknown item"
+        }
+    }
+
     private fun ensureChannels(channels: Int) {
         if (channels <= 0) return
         if (filters.size == channels && filters[0].size == NotchSettings.COUNT) return
         filters = Array(channels) { Array(NotchSettings.COUNT) { ChannelState() } }
+    }
+
+    private companion object {
+        const val TAG = "NotchAudioProcessor"
     }
 }
