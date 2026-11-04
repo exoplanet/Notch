@@ -51,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -71,27 +72,33 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.exoplanet.notch.AlbumScanner
-import com.exoplanet.notch.AlbumOrder
+import com.exoplanet.notch.FlatTrack
 import com.exoplanet.notch.NotchEngine
 import com.exoplanet.notch.PlaybackService
 import com.exoplanet.notch.Playlist
+import com.exoplanet.notch.PlaylistEntry
+import com.exoplanet.notch.TrackMetadataReader
+import com.exoplanet.notch.TrackTags
 import com.exoplanet.notch.toMediaItem
 import com.exoplanet.notch.dsp.NotchBand
 import com.exoplanet.notch.dsp.NotchSettings
 import com.exoplanet.notch.testNoiseUri
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 
 internal val Ink: Color
@@ -161,6 +168,8 @@ fun NotchApp() {
     var errorText by remember { mutableStateOf<String?>(null) }
     var page by remember { mutableStateOf(AppPage.Player) }
     var menuOpen by remember { mutableStateOf(false) }
+    var playQueue by remember { mutableStateOf(Playlist()) }
+    var repeatMode by remember { mutableIntStateOf(Player.REPEAT_MODE_OFF) }
     BackHandler(enabled = page != AppPage.Player) { page = AppPage.Player }
 
     DisposableEffect(context) {
@@ -175,16 +184,19 @@ fun NotchApp() {
 
     DisposableEffect(player) {
         val current = player ?: return@DisposableEffect onDispose {}
+        current.shuffleModeEnabled = false
+        repeatMode = current.repeatMode
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 isPlaying = player.isPlaying
                 durationMs = player.duration.coerceAtLeast(0L)
-                errorText = player.playerError?.message
+                player.playerError?.message?.let { errorText = it }
                 if (!scrubbing) positionMs = player.currentPosition.coerceAtLeast(0L)
                 queueIndex = player.currentMediaItemIndex.coerceAtLeast(0)
                 queueCount = player.mediaItemCount
                 hasPrevious = player.hasPreviousMediaItem()
                 hasNext = player.hasNextMediaItem()
+                repeatMode = player.repeatMode
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -224,9 +236,115 @@ fun NotchApp() {
         if (!granted) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    fun replaceQueue(entries: List<PlaylistEntry>, repeat: Int, label: String) {
+        val current = player ?: return
+        val next = Playlist(entries)
+        val items = next.flatten().map { it.toMediaItem() }
+        if (items.isEmpty()) return
+        playQueue = next
+        clipName = label
+        errorText = null
+        ensureNotificationPermission()
+        current.shuffleModeEnabled = false
+        current.repeatMode = repeat
+        repeatMode = repeat
+        current.setMediaItems(items, 0, 0L)
+        current.prepare()
+        current.play()
+    }
+
+    fun appendEntries(more: List<PlaylistEntry>) {
+        val current = player ?: return
+        val wasEmpty = playQueue.entries.isEmpty()
+        var next = playQueue
+        val added = mutableListOf<FlatTrack>()
+        for (entry in more) {
+            val before = next.flatten().size
+            next = when (entry) {
+                is PlaylistEntry.Album -> next.appendAlbum(entry)
+                is PlaylistEntry.SingleFile -> next.appendAll(listOf(entry))
+            }
+            val flat = next.flatten()
+            if (flat.size > before) added += flat.drop(before)
+        }
+        if (added.isEmpty()) return
+        playQueue = next
+        errorText = null
+        ensureNotificationPermission()
+        current.shuffleModeEnabled = false
+        val items = added.map { it.toMediaItem() }
+        if (wasEmpty) {
+            clipName = Playlist.trackTitle(items.first().mediaMetadata.title, items.first().localConfiguration?.uri?.lastPathSegment)
+            current.setMediaItems(items, 0, 0L)
+            current.prepare()
+            current.play()
+        } else {
+            current.addMediaItems(items)
+        }
+    }
+
+    fun moveQueueEntry(from: Int, to: Int) {
+        val current = player ?: return
+        val move = playQueue.mediaMove(from, to) ?: return
+        current.moveMediaItems(move.fromIndex, move.toIndexExclusive, move.newIndex)
+        playQueue = playQueue.moveEntry(from, to)
+    }
+
+    fun removeQueueEntry(id: String) {
+        val current = player ?: return
+        val index = playQueue.entries.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val range = playQueue.mediaRange(index)
+        current.removeMediaItems(range.first, range.last + 1)
+        playQueue = playQueue.removeEntry(id)
+        if (playQueue.entries.isEmpty()) clipName = "Nothing loaded"
+    }
+
+    fun removeQueueTrack(entryId: String, trackIndex: Int) {
+        val current = player ?: return
+        val flat = playQueue.flatten().firstOrNull { it.entryId == entryId && it.trackIndex == trackIndex } ?: return
+        current.removeMediaItems(flat.mediaIndex, flat.mediaIndex + 1)
+        playQueue = playQueue.removeTrack(entryId, trackIndex)
+        if (playQueue.entries.isEmpty()) clipName = "Nothing loaded"
+    }
+
+    fun applyDrag(entryId: String, proposedOffset: Float, heights: Map<String, Int>): Float {
+        var offset = proposedOffset
+        var guard = 0
+        while (guard++ < 24) {
+            val entries = playQueue.entries
+            val index = entries.indexOfFirst { it.id == entryId }
+            if (index < 0) return 0f
+            val nextHeight = entries.getOrNull(index + 1)?.let { (heights[it.id] ?: 120).toFloat() }
+            val prevHeight = entries.getOrNull(index - 1)?.let { (heights[it.id] ?: 120).toFloat() }
+            when {
+                nextHeight != null && offset > nextHeight / 2f -> {
+                    moveQueueEntry(index, index + 1)
+                    offset -= nextHeight
+                }
+                prevHeight != null && offset < -(prevHeight / 2f) -> {
+                    moveQueueEntry(index, index - 1)
+                    offset += prevHeight
+                }
+                else -> return offset
+            }
+        }
+        return offset
+    }
+
+    fun cycleRepeat() {
+        val current = player ?: return
+        val next = when (current.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+        current.repeatMode = next
+        repeatMode = next
+    }
+
     val openAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val current = player
-        if (uri == null || current == null) return@rememberLauncherForActivityResult
+        if (uri == null || player == null) return@rememberLauncherForActivityResult
         try {
             context.contentResolver.takePersistableUriPermission(
                 uri,
@@ -234,20 +352,31 @@ fun NotchApp() {
             )
         } catch (_: Exception) {
         }
-        val name = displayName(context, uri)
-        clipName = name
-        ensureNotificationPermission()
-        current.repeatMode = Player.REPEAT_MODE_OFF
-        current.shuffleModeEnabled = false
-        current.setMediaItem(mediaItem(uri, name))
-        current.prepare()
-        current.play()
+        albumJob?.cancel()
+        albumJob = scope.launch {
+            val name = displayName(context, uri)
+            val tags = withContext(Dispatchers.IO) {
+                runCatching { TrackMetadataReader.read(context, uri) }.getOrDefault(TrackTags())
+            }
+            if (!isActive) return@launch
+            val title = tags.title?.takeIf { it.isNotBlank() } ?: name
+            replaceQueue(
+                listOf(
+                    PlaylistEntry.SingleFile(
+                        id = UUID.randomUUID().toString(),
+                        uri = uri.toString(),
+                        metadata = tags.copy(title = title),
+                    ),
+                ),
+                repeat = Player.REPEAT_MODE_OFF,
+                label = title,
+            )
+        }
     }
 
     val addFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val current = player
-        if (uris.isEmpty() || current == null) return@rememberLauncherForActivityResult
-        val items = uris.map { uri ->
+        if (uris.isEmpty() || player == null) return@rememberLauncherForActivityResult
+        uris.forEach { uri ->
             try {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
@@ -255,23 +384,27 @@ fun NotchApp() {
                 )
             } catch (_: Exception) {
             }
-            mediaItem(uri, displayName(context, uri))
         }
-        clipName = Playlist.trackTitle(
-            items.first().mediaMetadata.title,
-            items.first().localConfiguration?.uri?.lastPathSegment,
-        )
-        ensureNotificationPermission()
-        current.repeatMode = Player.REPEAT_MODE_OFF
-        current.shuffleModeEnabled = false
-        current.setMediaItems(items, 0, 0L)
-        current.prepare()
-        current.play()
+        albumJob?.cancel()
+        albumJob = scope.launch {
+            val entries = withContext(Dispatchers.IO) {
+                uris.map { uri ->
+                    val tags = runCatching { TrackMetadataReader.read(context, uri) }.getOrDefault(TrackTags())
+                    val name = displayName(context, uri)
+                    PlaylistEntry.SingleFile(
+                        id = UUID.randomUUID().toString(),
+                        uri = uri.toString(),
+                        metadata = tags.copy(title = tags.title?.takeIf { it.isNotBlank() } ?: name),
+                    )
+                }
+            }
+            if (!isActive) return@launch
+            appendEntries(entries)
+        }
     }
 
     val addAlbum = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
-        val current = player
-        if (treeUri == null || current == null) return@rememberLauncherForActivityResult
+        if (treeUri == null || player == null) return@rememberLauncherForActivityResult
         try {
             context.contentResolver.takePersistableUriPermission(
                 treeUri,
@@ -282,27 +415,28 @@ fun NotchApp() {
         albumJob?.cancel()
         albumJob = scope.launch {
             val previousName = clipName
-            clipName = "Reading album…"
-            errorText = null
+            val queueWasEmpty = playQueue.entries.isEmpty()
+            if (queueWasEmpty) clipName = "Reading album…"
             val tracks = AlbumScanner.collect(context, treeUri)
             if (!isActive) return@launch
-            val sorted = AlbumOrder.sort(tracks)
-            if (sorted.isEmpty()) {
-                clipName = previousName
+            if (tracks.isEmpty()) {
+                if (queueWasEmpty) clipName = previousName
                 errorText = "No audio files in that folder."
                 return@launch
             }
-            val items = sorted.map { it.toMediaItem() }
-            clipName = Playlist.trackTitle(
-                items.first().mediaMetadata.title,
-                items.first().localConfiguration?.uri?.lastPathSegment,
+            val albumTitle = tracks.firstNotNullOfOrNull { it.album?.trim()?.takeIf { name -> name.isNotEmpty() } }
+                ?: treeDisplayName(context, treeUri)
+                ?: "Album"
+            appendEntries(
+                listOf(
+                    PlaylistEntry.Album(
+                        id = UUID.randomUUID().toString(),
+                        treeUri = treeUri.toString(),
+                        title = albumTitle,
+                        tracks = tracks,
+                    ),
+                ),
             )
-            ensureNotificationPermission()
-            current.repeatMode = Player.REPEAT_MODE_OFF
-            current.shuffleModeEnabled = false
-            current.setMediaItems(items, 0, 0L)
-            current.prepare()
-            current.play()
         }
     }
 
@@ -312,6 +446,24 @@ fun NotchApp() {
     }
 
     Scaffold(containerColor = Background) { padding ->
+        if (page == AppPage.Queue) {
+            QueueScreen(
+                playlist = playQueue,
+                currentMediaIndex = queueIndex,
+                onBack = { page = AppPage.Player },
+                onSeek = { index ->
+                    val current = player ?: return@QueueScreen
+                    if (index !in 0 until current.mediaItemCount) return@QueueScreen
+                    current.seekTo(index, 0L)
+                    current.play()
+                },
+                onDragEntry = { entryId, offset, heights -> applyDrag(entryId, offset, heights) },
+                onRemoveEntry = { id -> removeQueueEntry(id) },
+                onRemoveTrack = { entryId, trackIndex -> removeQueueTrack(entryId, trackIndex) },
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         if (page != AppPage.Player) {
             AppPageScreen(
                 page = page,
@@ -436,14 +588,19 @@ fun NotchApp() {
                 val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
                     onClick = {
-                        val current = player ?: return@Button
-                        ensureNotificationPermission()
-                        clipName = "Test noise"
-                        current.repeatMode = Player.REPEAT_MODE_ONE
-                        current.shuffleModeEnabled = false
-                        current.setMediaItem(mediaItem(testNoiseUri(context), "Test noise"))
-                        current.prepare()
-                        current.play()
+                        albumJob?.cancel()
+                        albumJob = null
+                        replaceQueue(
+                            listOf(
+                                PlaylistEntry.SingleFile(
+                                    id = UUID.randomUUID().toString(),
+                                    uri = testNoiseUri(context).toString(),
+                                    metadata = TrackTags(title = "Test noise"),
+                                ),
+                            ),
+                            repeat = Player.REPEAT_MODE_ONE,
+                            label = "Test noise",
+                        )
                     },
                     enabled = player != null,
                     modifier = Modifier.weight(1.35f),
@@ -490,13 +647,33 @@ fun NotchApp() {
                     contentPadding = buttonPadding,
                 ) { Text("Next", textAlign = TextAlign.Center, maxLines = 1) }
             }
-            Button(
-                onClick = { addAlbum.launch(null) },
-                enabled = player != null,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-            ) { Text("Add album", textAlign = TextAlign.Center, maxLines = 1) }
-            Text(clipName, color = Muted)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                Button(
+                    onClick = { addAlbum.launch(null) },
+                    enabled = player != null,
+                    modifier = Modifier.weight(1.4f),
+                    contentPadding = buttonPadding,
+                ) { Text("Add album", textAlign = TextAlign.Center, maxLines = 1) }
+                Button(
+                    onClick = { page = AppPage.Queue },
+                    modifier = Modifier.weight(0.8f),
+                    contentPadding = buttonPadding,
+                ) { Text("Queue", textAlign = TextAlign.Center, maxLines = 1) }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(clipName, color = Muted, modifier = Modifier.weight(1f))
+                TextButton(onClick = { cycleRepeat() }, enabled = player != null) {
+                    Text(repeatLabel(repeatMode))
+                }
+            }
             Playlist.positionLabel(queueIndex, queueCount)?.let { label ->
                 Text(label, color = Muted)
             }
@@ -703,11 +880,16 @@ private fun List<NotchBand>.replace(index: Int, band: NotchBand): List<NotchBand
     return mapIndexed { i, existing -> if (i == index) band else existing }
 }
 
-private fun mediaItem(uri: Uri, title: String): MediaItem {
-    return MediaItem.Builder()
-        .setUri(uri)
-        .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
-        .build()
+private fun treeDisplayName(context: Context, treeUri: Uri): String? {
+    return DocumentFile.fromTreeUri(context, treeUri)?.name?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+private fun repeatLabel(mode: Int): String {
+    return when (mode) {
+        Player.REPEAT_MODE_ALL -> "Repeat all"
+        Player.REPEAT_MODE_ONE -> "Repeat one"
+        else -> "Repeat off"
+    }
 }
 
 private fun displayName(context: Context, uri: Uri): String {

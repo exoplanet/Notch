@@ -46,6 +46,7 @@ internal enum class AppPage {
     Guide,
     About,
     Update,
+    Queue,
 }
 
 @Composable
@@ -53,7 +54,8 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
     val title = when (page) {
         AppPage.About -> "About"
         AppPage.Update -> "Update"
-        else -> "Guide"
+        AppPage.Queue -> "Queue"
+        AppPage.Guide, AppPage.Player -> "Guide"
     }
     Column(
         modifier = modifier
@@ -69,7 +71,8 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
         when (page) {
             AppPage.About -> AboutBody()
             AppPage.Update -> UpdateBody()
-            else -> GuideBody()
+            AppPage.Guide, AppPage.Player -> GuideBody()
+            AppPage.Queue -> Unit
         }
     }
 }
