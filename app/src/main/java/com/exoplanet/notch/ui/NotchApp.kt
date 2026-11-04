@@ -80,6 +80,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.exoplanet.notch.NotchEngine
 import com.exoplanet.notch.PlaybackService
+import com.exoplanet.notch.Playlist
 import com.exoplanet.notch.dsp.NotchBand
 import com.exoplanet.notch.dsp.NotchSettings
 import com.exoplanet.notch.testNoiseUri
@@ -141,6 +142,10 @@ fun NotchApp() {
     var player by remember { mutableStateOf<Player?>(null) }
     var settings by remember { mutableStateOf(NotchEngine.current()) }
     var clipName by remember { mutableStateOf("Nothing loaded") }
+    var queueIndex by remember { mutableStateOf(0) }
+    var queueCount by remember { mutableStateOf(0) }
+    var hasPrevious by remember { mutableStateOf(false) }
+    var hasNext by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var positionMs by remember { mutableLongStateOf(0L) }
@@ -169,6 +174,23 @@ fun NotchApp() {
                 durationMs = player.duration.coerceAtLeast(0L)
                 errorText = player.playerError?.message
                 if (!scrubbing) positionMs = player.currentPosition.coerceAtLeast(0L)
+                queueIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+                queueCount = player.mediaItemCount
+                hasPrevious = player.hasPreviousMediaItem()
+                hasNext = player.hasNextMediaItem()
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem != null) {
+                    clipName = Playlist.trackTitle(
+                        mediaItem.mediaMetadata.title,
+                        mediaItem.localConfiguration?.uri?.lastPathSegment,
+                    )
+                }
+                queueIndex = current.currentMediaItemIndex.coerceAtLeast(0)
+                queueCount = current.mediaItemCount
+                hasPrevious = current.hasPreviousMediaItem()
+                hasNext = current.hasNextMediaItem()
             }
         }
         current.addListener(listener)
@@ -198,17 +220,44 @@ fun NotchApp() {
     val openAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val current = player
         if (uri == null || current == null) return@rememberLauncherForActivityResult
-        runCatching {
+        try {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
+        } catch (_: Exception) {
         }
         val name = displayName(context, uri)
         clipName = name
         ensureNotificationPermission()
         current.repeatMode = Player.REPEAT_MODE_OFF
+        current.shuffleModeEnabled = false
         current.setMediaItem(mediaItem(uri, name))
+        current.prepare()
+        current.play()
+    }
+
+    val addFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val current = player
+        if (uris.isEmpty() || current == null) return@rememberLauncherForActivityResult
+        val items = uris.map { uri ->
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: Exception) {
+            }
+            mediaItem(uri, displayName(context, uri))
+        }
+        clipName = Playlist.trackTitle(
+            items.first().mediaMetadata.title,
+            items.first().localConfiguration?.uri?.lastPathSegment,
+        )
+        ensureNotificationPermission()
+        current.repeatMode = Player.REPEAT_MODE_OFF
+        current.shuffleModeEnabled = false
+        current.setMediaItems(items, 0, 0L)
         current.prepare()
         current.play()
     }
@@ -347,6 +396,7 @@ fun NotchApp() {
                         ensureNotificationPermission()
                         clipName = "Test noise"
                         current.repeatMode = Player.REPEAT_MODE_ONE
+                        current.shuffleModeEnabled = false
                         current.setMediaItem(mediaItem(testNoiseUri(context), "Test noise"))
                         current.prepare()
                         current.play()
@@ -371,7 +421,35 @@ fun NotchApp() {
                     contentPadding = buttonPadding,
                 ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                Button(
+                    onClick = { addFiles.launch(arrayOf("audio/*")) },
+                    enabled = player != null,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Add files", textAlign = TextAlign.Center, maxLines = 2) }
+                Button(
+                    onClick = { player?.seekToPreviousMediaItem() },
+                    enabled = player != null && hasPrevious,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Previous", textAlign = TextAlign.Center, maxLines = 1) }
+                Button(
+                    onClick = { player?.seekToNextMediaItem() },
+                    enabled = player != null && hasNext,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Next", textAlign = TextAlign.Center, maxLines = 1) }
+            }
             Text(clipName, color = Muted)
+            Playlist.positionLabel(queueIndex, queueCount)?.let { label ->
+                Text(label, color = Muted)
+            }
             if (durationMs > 0L) {
                 Text("${formatTime(if (scrubbing) scrubMs else positionMs)} / ${formatTime(durationMs)}", color = Ink)
                 Slider(
