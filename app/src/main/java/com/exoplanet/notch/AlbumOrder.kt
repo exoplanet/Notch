@@ -9,6 +9,7 @@ data class AlbumTrack(
     val title: String? = null,
     val artist: String? = null,
     val album: String? = null,
+    val unavailable: Boolean = false,
 )
 
 object AlbumOrder {

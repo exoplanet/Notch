@@ -81,12 +81,18 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.exoplanet.notch.AlbumScanResult
 import com.exoplanet.notch.AlbumScanner
 import com.exoplanet.notch.FlatTrack
 import com.exoplanet.notch.NotchEngine
 import com.exoplanet.notch.PlaybackService
 import com.exoplanet.notch.Playlist
 import com.exoplanet.notch.PlaylistEntry
+import com.exoplanet.notch.PlaylistRefresh
+import com.exoplanet.notch.PlaylistStore
+import com.exoplanet.notch.ResumePoint
+import com.exoplanet.notch.SavedLibrary
+import com.exoplanet.notch.SavedPlaylist
 import com.exoplanet.notch.TrackMetadataReader
 import com.exoplanet.notch.TrackTags
 import com.exoplanet.notch.toMediaItem
@@ -110,7 +116,7 @@ internal val Muted: Color
 internal val Teal: Color
     @Composable get() = if (isSystemInDarkTheme()) Color(0xFF7EE0C6) else Color(0xFF0E6B5C)
 
-private val Amber: Color
+internal val Amber: Color
     @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE7C07A) else Color(0xFF8A4E00)
 
 private val Background: Color
@@ -169,6 +175,9 @@ fun NotchApp() {
     var page by remember { mutableStateOf(AppPage.Player) }
     var menuOpen by remember { mutableStateOf(false) }
     var playQueue by remember { mutableStateOf(Playlist()) }
+    var library by remember { mutableStateOf(SavedLibrary()) }
+    var loadedId by remember { mutableStateOf<String?>(null) }
+    var resumeOffer by remember { mutableStateOf<ResumePoint?>(null) }
     var repeatMode by remember { mutableIntStateOf(Player.REPEAT_MODE_OFF) }
     BackHandler(enabled = page != AppPage.Player) { page = AppPage.Player }
 
@@ -224,6 +233,12 @@ fun NotchApp() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        val stored = withContext(Dispatchers.IO) { PlaylistStore.open(context).read() }
+        library = stored
+        resumeOffer = stored.resume
+    }
+
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
@@ -236,21 +251,129 @@ fun NotchApp() {
         if (!granted) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    fun replaceQueue(entries: List<PlaylistEntry>, repeat: Int, label: String) {
+    fun replaceQueue(
+        entries: List<PlaylistEntry>,
+        repeat: Int,
+        label: String,
+        savedId: String? = null,
+        startIndex: Int = 0,
+        startPositionMs: Long = 0L,
+    ) {
         val current = player ?: return
         val next = Playlist(entries)
         val items = next.flatten().map { it.toMediaItem() }
-        if (items.isEmpty()) return
         playQueue = next
+        loadedId = savedId
         clipName = label
         errorText = null
-        ensureNotificationPermission()
         current.shuffleModeEnabled = false
         current.repeatMode = repeat
         repeatMode = repeat
-        current.setMediaItems(items, 0, 0L)
+        if (items.isEmpty()) {
+            current.clearMediaItems()
+            return
+        }
+        ensureNotificationPermission()
+        val index = startIndex.coerceIn(0, items.lastIndex)
+        current.setMediaItems(items, index, startPositionMs.coerceAtLeast(0L))
         current.prepare()
         current.play()
+    }
+
+    fun persistLibrary(next: SavedLibrary) {
+        library = next
+        PlaylistStore.open(context).write(next)
+    }
+
+    fun storeResumeFromPlayer() {
+        val id = loadedId ?: return
+        val current = player ?: return
+        if (current.mediaItemCount == 0) return
+        val point = ResumePoint(
+            playlistId = id,
+            mediaIndex = current.currentMediaItemIndex.coerceAtLeast(0),
+            positionMs = current.currentPosition.coerceAtLeast(0L),
+        )
+        val next = library.remember(point)
+        if (next != library) persistLibrary(next)
+    }
+
+    fun loadSaved(saved: SavedPlaylist, startIndex: Int, startPositionMs: Long) {
+        if (player == null) return
+        albumJob?.cancel()
+        albumJob = scope.launch {
+            clipName = "Opening ${saved.name}…"
+            val refreshed = withContext(Dispatchers.IO) {
+                PlaylistRefresh.refresh(
+                    saved.entries,
+                    scan = { tree ->
+                        val uri = runCatching { Uri.parse(tree) }.getOrNull()
+                        if (uri == null) AlbumScanResult.Failed
+                        else AlbumScanner.scan(context, uri)
+                    },
+                    canRead = { PlaylistStore.canRead(context, it) },
+                )
+            }
+            if (!isActive) return@launch
+            val now = System.currentTimeMillis()
+            val flat = Playlist(refreshed).flatten()
+            val index = if (flat.isEmpty()) 0 else startIndex.coerceIn(0, flat.lastIndex)
+            val position = if (flat.isEmpty()) 0L else startPositionMs.coerceAtLeast(0L)
+            var nextLibrary = library.updateEntries(saved.id, refreshed, now) ?: library
+            nextLibrary = nextLibrary.remember(ResumePoint(saved.id, index, position))
+            if (nextLibrary != library) persistLibrary(nextLibrary)
+            resumeOffer = null
+            val label = flat.getOrNull(index)?.title ?: saved.name
+            val missing = refreshed.sumOf { entry ->
+                when (entry) {
+                    is PlaylistEntry.SingleFile -> if (entry.unavailable) 1 else 0
+                    is PlaylistEntry.Album -> entry.tracks.count { it.unavailable }
+                }
+            }
+            replaceQueue(
+                refreshed,
+                repeat = Player.REPEAT_MODE_OFF,
+                label = label,
+                savedId = saved.id,
+                startIndex = index,
+                startPositionMs = position,
+            )
+            if (flat.isEmpty()) errorText = "Those tracks are unavailable."
+            else if (missing > 0) errorText = "Some tracks are unavailable."
+        }
+    }
+
+    fun saveQueue(name: String) {
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val next = library.saveNew(id, name, playQueue.entries, now) ?: return
+        persistLibrary(next)
+        loadedId = id
+    }
+
+    fun updateLoadedPlaylist() {
+        val id = loadedId ?: return
+        val now = System.currentTimeMillis()
+        val next = library.updateEntries(id, playQueue.entries, now) ?: return
+        if (next != library) persistLibrary(next)
+    }
+
+    fun dismissResume() {
+        resumeOffer = null
+        val next = library.clearResume()
+        if (next != library) persistLibrary(next)
+    }
+
+    LaunchedEffect(player, loadedId, isPlaying) {
+        if (loadedId == null || player == null) return@LaunchedEffect
+        if (!isPlaying) {
+            storeResumeFromPlayer()
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            delay(5_000)
+            storeResumeFromPlayer()
+        }
     }
 
     fun appendEntries(more: List<PlaylistEntry>) {
@@ -344,12 +467,12 @@ fun NotchApp() {
 
     fun removeQueueTrack(entryId: String, trackIndex: Int) {
         val current = player ?: return
-        val flat = playQueue.flatten().firstOrNull { it.entryId == entryId && it.trackIndex == trackIndex } ?: return
+        val flat = playQueue.flatten().firstOrNull { it.entryId == entryId && it.trackIndex == trackIndex }
         val wasPlaying = current.playWhenReady
-        current.removeMediaItems(flat.mediaIndex, flat.mediaIndex + 1)
+        if (flat != null) current.removeMediaItems(flat.mediaIndex, flat.mediaIndex + 1)
         playQueue = playQueue.removeTrack(entryId, trackIndex)
         if (playQueue.entries.isEmpty()) clipName = "Nothing loaded"
-        else keepPlaying(current, wasPlaying)
+        else if (flat != null) keepPlaying(current, wasPlaying)
     }
 
     fun applyDrag(entryId: String, proposedOffset: Float, heights: Map<String, Int>): Float {
@@ -494,6 +617,7 @@ fun NotchApp() {
             QueueScreen(
                 playlist = playQueue,
                 currentMediaIndex = queueIndex,
+                loadedName = library.playlists.find { it.id == loadedId }?.name,
                 onBack = { page = AppPage.Player },
                 onSeek = { index ->
                     val current = player ?: return@QueueScreen
@@ -504,6 +628,33 @@ fun NotchApp() {
                 onDragEntry = { entryId, offset, heights -> applyDrag(entryId, offset, heights) },
                 onRemoveEntry = { id -> removeQueueEntry(id) },
                 onRemoveTrack = { entryId, trackIndex -> removeQueueTrack(entryId, trackIndex) },
+                onSave = { name -> saveQueue(name) },
+                onUpdate = if (loadedId == null) null else {
+                    { updateLoadedPlaylist() }
+                },
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
+        if (page == AppPage.Playlists) {
+            PlaylistsScreen(
+                playlists = library.playlists,
+                onBack = { page = AppPage.Player },
+                onLoad = { saved ->
+                    page = AppPage.Player
+                    loadSaved(saved, startIndex = 0, startPositionMs = 0L)
+                },
+                onRename = { id, name ->
+                    val next = library.rename(id, name, System.currentTimeMillis()) ?: return@PlaylistsScreen
+                    if (next != library) persistLibrary(next)
+                },
+                onDelete = { id ->
+                    val deletion = library.delete(id) ?: return@PlaylistsScreen
+                    if (loadedId == id) loadedId = null
+                    if (resumeOffer?.playlistId == id) resumeOffer = null
+                    persistLibrary(deletion.library)
+                    PlaylistStore.release(context, deletion.releasedUris)
+                },
                 modifier = Modifier.padding(padding),
             )
             return@Scaffold
@@ -543,6 +694,13 @@ fun NotchApp() {
                         containerColor = Panel,
                     ) {
                         DropdownMenuItem(
+                            text = { Text("Playlists") },
+                            onClick = {
+                                menuOpen = false
+                                page = AppPage.Playlists
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Guide") },
                             onClick = {
                                 menuOpen = false
@@ -571,6 +729,25 @@ fun NotchApp() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = Muted,
             )
+            val offer = resumeOffer
+            val offerPlaylist = offer?.let { point -> library.playlists.find { it.id == point.playlistId } }
+            if (offer != null && offerPlaylist != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Resume ${offerPlaylist.name}",
+                        modifier = Modifier.weight(1f),
+                        color = Ink,
+                        maxLines = 1,
+                    )
+                    TextButton(onClick = {
+                        loadSaved(offerPlaylist, offer.mediaIndex, offer.positionMs)
+                    }) { Text("Resume") }
+                    TextButton(onClick = { dismissResume() }) { Text("Dismiss") }
+                }
+            }
             NumberRow(
                 label = "Width",
                 value = settings.bandwidthTenths,

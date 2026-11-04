@@ -42,13 +42,17 @@ import com.exoplanet.notch.PlaylistEntry
 internal fun QueueScreen(
     playlist: Playlist,
     currentMediaIndex: Int,
+    loadedName: String?,
     onBack: () -> Unit,
     onSeek: (Int) -> Unit,
     onDragEntry: (entryId: String, proposedOffset: Float, heights: Map<String, Int>) -> Float,
     onRemoveEntry: (String) -> Unit,
     onRemoveTrack: (String, Int) -> Unit,
+    onSave: (String) -> Unit,
+    onUpdate: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    var saveOpen by remember { mutableStateOf(false) }
     var dragId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val heights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
@@ -62,21 +66,43 @@ internal fun QueueScreen(
     ) {
         TextButton(onClick = onBack) { Text("Back") }
         Text("Queue", style = MaterialTheme.typography.headlineMedium, color = Ink)
+        if (!loadedName.isNullOrBlank()) {
+            Text(loadedName, color = Muted, style = MaterialTheme.typography.bodyLarge)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(
+                onClick = { saveOpen = true },
+                enabled = entries.isNotEmpty(),
+            ) { Text("Save as playlist") }
+            if (onUpdate != null) {
+                TextButton(onClick = onUpdate) { Text("Update playlist") }
+            }
+        }
+        val unavailable = entries.sumOf { entry ->
+            when (entry) {
+                is PlaylistEntry.SingleFile -> if (entry.unavailable) 1 else 0
+                is PlaylistEntry.Album -> entry.tracks.count { it.unavailable }
+            }
+        }
+        if (unavailable > 0) {
+            Text(
+                if (unavailable == 1) "1 track unavailable" else "$unavailable tracks unavailable",
+                color = Amber,
+            )
+        }
         if (entries.isEmpty()) {
             Text(
                 "Nothing queued",
                 color = Muted,
                 modifier = Modifier.padding(top = 12.dp),
             )
-            return@Column
-        }
-        LazyColumn(
+        } else LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .padding(top = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
+            itemsIndexed(entries, key = { _, entry -> entry.id }) { _, entry ->
                 val dragging = dragId == entry.id
                 Column(
                     modifier = Modifier
@@ -87,13 +113,14 @@ internal fun QueueScreen(
                 ) {
                     when (entry) {
                         is PlaylistEntry.SingleFile -> {
-                            val flat = flats.first { it.entryId == entry.id }
+                            val flat = flats.firstOrNull { it.entryId == entry.id }
                             QueueRow(
-                                title = flat.title,
-                                subtitle = flat.artist,
+                                title = flat?.title ?: entry.metadata.title ?: "Audio",
+                                subtitle = if (entry.unavailable) "Unavailable" else flat?.artist,
                                 header = false,
-                                highlighted = flat.mediaIndex == currentMediaIndex,
-                                onClick = { onSeek(flat.mediaIndex) },
+                                highlighted = flat != null && flat.mediaIndex == currentMediaIndex,
+                                flagged = entry.unavailable,
+                                onClick = flat?.let { track -> { onSeek(track.mediaIndex) } },
                                 onRemove = { onRemoveEntry(entry.id) },
                                 onDrag = { delta ->
                                     dragId = entry.id
@@ -106,10 +133,11 @@ internal fun QueueScreen(
                             )
                         }
                         is PlaylistEntry.Album -> {
-                            val start = playlist.mediaStart(index)
+                            val missing = entry.tracks.count { it.unavailable }
+                            val available = entry.tracks.size - missing
                             QueueRow(
                                 title = entry.title,
-                                subtitle = "${entry.tracks.size} tracks",
+                                subtitle = albumSubtitle(available, missing),
                                 header = true,
                                 highlighted = false,
                                 onClick = null,
@@ -124,15 +152,16 @@ internal fun QueueScreen(
                                 },
                             )
                             entry.tracks.forEachIndexed { trackIndex, track ->
-                                val mediaIndex = start + trackIndex
-                                key(track.uri) {
+                                val flat = flats.firstOrNull { it.entryId == entry.id && it.trackIndex == trackIndex }
+                                key("${entry.id}#$trackIndex") {
                                     QueueRow(
                                         title = track.title?.takeIf { it.isNotBlank() } ?: track.fileName,
-                                        subtitle = track.artist,
+                                        subtitle = if (track.unavailable) "Unavailable" else track.artist,
                                         header = false,
                                         indented = true,
-                                        highlighted = mediaIndex == currentMediaIndex,
-                                        onClick = { onSeek(mediaIndex) },
+                                        highlighted = flat != null && flat.mediaIndex == currentMediaIndex,
+                                        flagged = track.unavailable,
+                                        onClick = flat?.let { item -> { onSeek(item.mediaIndex) } },
                                         onRemove = { onRemoveTrack(entry.id, trackIndex) },
                                         onDrag = null,
                                         onDragEnd = {},
@@ -145,6 +174,24 @@ internal fun QueueScreen(
             }
         }
     }
+    if (saveOpen) {
+        NameDialog(
+            title = "Save as playlist",
+            initial = loadedName.orEmpty(),
+            confirmLabel = "Save",
+            onDismiss = { saveOpen = false },
+            onConfirm = { name ->
+                saveOpen = false
+                onSave(name)
+            },
+        )
+    }
+}
+
+private fun albumSubtitle(available: Int, missing: Int): String {
+    if (missing == 0) return if (available == 1) "1 track" else "$available tracks"
+    if (available == 0) return if (missing == 1) "1 unavailable" else "$missing unavailable"
+    return "$available tracks, $missing unavailable"
 }
 
 @Composable
@@ -154,6 +201,7 @@ private fun QueueRow(
     header: Boolean,
     highlighted: Boolean,
     onClick: (() -> Unit)?,
+    flagged: Boolean = false,
     onRemove: () -> Unit,
     onDrag: ((Float) -> Unit)?,
     onDragEnd: () -> Unit,
@@ -238,7 +286,11 @@ private fun QueueRow(
                         },
                     )
                     if (!subtitle.isNullOrBlank()) {
-                        Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            subtitle,
+                            color = if (flagged) Amber else Muted,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                 }
             }

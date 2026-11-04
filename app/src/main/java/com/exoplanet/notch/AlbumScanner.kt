@@ -14,10 +14,32 @@ object AlbumScanner {
     )
 
     suspend fun collect(context: Context, treeUri: Uri): List<AlbumTrack> = withContext(Dispatchers.IO) {
-        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext emptyList()
+        readTracks(context, treeUri)
+    }
+
+    /**
+     * Ok means the tree could be listed, even when it contains no audio.
+     * Failed means the grant or the document could not be read, so a saved cache should be kept.
+     */
+    fun scan(context: Context, treeUri: Uri): AlbumScanResult {
+        return try {
+            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return AlbumScanResult.Failed
+            try {
+                root.listFiles()
+            } catch (_: Exception) {
+                return AlbumScanResult.Failed
+            }
+            AlbumScanResult.Ok(readTracks(context, treeUri))
+        } catch (_: Exception) {
+            AlbumScanResult.Failed
+        }
+    }
+
+    private fun readTracks(context: Context, treeUri: Uri): List<AlbumTrack> {
+        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
         val found = mutableListOf<AlbumTrack>()
         walk(context, root, "", found)
-        found
+        return found
     }
 
     private fun walk(context: Context, document: DocumentFile, relativeFolder: String, into: MutableList<AlbumTrack>) {
@@ -57,6 +79,11 @@ object AlbumScanner {
         val extension = name?.substringAfterLast('.', "")?.lowercase().orEmpty()
         return extension in audioExtensions
     }
+}
+
+sealed class AlbumScanResult {
+    data class Ok(val tracks: List<AlbumTrack>) : AlbumScanResult()
+    data object Failed : AlbumScanResult()
 }
 
 fun AlbumTrack.toMediaItem(): MediaItem {

@@ -48,9 +48,11 @@ class Playlist(
         val out = mutableListOf<FlatTrack>()
         entries.forEachIndexed { entryIndex, entry ->
             when (entry) {
-                is PlaylistEntry.SingleFile -> out += entry.toFlat(entryIndex, out.size)
+                is PlaylistEntry.SingleFile -> if (!entry.unavailable) {
+                    out += entry.toFlat(entryIndex, out.size)
+                }
                 is PlaylistEntry.Album -> entry.tracks.forEachIndexed { trackIndex, track ->
-                    out += track.toFlat(entry, entryIndex, trackIndex, out.size)
+                    if (!track.unavailable) out += track.toFlat(entry, entryIndex, trackIndex, out.size)
                 }
             }
         }
@@ -121,8 +123,10 @@ sealed class PlaylistEntry {
         override val id: String,
         val uri: String,
         val metadata: TrackTags,
+        val unavailable: Boolean = false,
     ) : PlaylistEntry() {
-        override val mediaCount: Int = 1
+        override val mediaCount: Int
+            get() = if (unavailable) 0 else 1
     }
 
     data class Album(
@@ -131,7 +135,8 @@ sealed class PlaylistEntry {
         val title: String,
         val tracks: List<AlbumTrack>,
     ) : PlaylistEntry() {
-        override val mediaCount: Int = tracks.size
+        override val mediaCount: Int
+            get() = tracks.count { !it.unavailable }
     }
 }
 
