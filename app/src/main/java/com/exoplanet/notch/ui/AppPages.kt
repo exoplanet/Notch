@@ -87,7 +87,7 @@ private fun AboutBody() {
         AboutRow("Version", version)
         AboutRow("Author", "Allen Jensen")
         Text(
-            "Notch plays audio you choose and cuts narrow bands out of it. The file stays on this phone. Update only downloads a newer release from GitHub.",
+            "Notch plays audio you choose and cuts narrow bands out of it. You can queue several files or an album and save that queue as a playlist. The files stay on this phone. Update only downloads a newer release from GitHub.",
             style = MaterialTheme.typography.bodyLarge,
             color = Ink,
         )
