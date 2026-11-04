@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,9 +79,12 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.exoplanet.notch.AlbumScanner
+import com.exoplanet.notch.AlbumOrder
 import com.exoplanet.notch.NotchEngine
 import com.exoplanet.notch.PlaybackService
 import com.exoplanet.notch.Playlist
+import com.exoplanet.notch.toMediaItem
 import com.exoplanet.notch.dsp.NotchBand
 import com.exoplanet.notch.dsp.NotchSettings
 import com.exoplanet.notch.testNoiseUri
@@ -88,6 +92,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 internal val Ink: Color
     @Composable get() = if (isSystemInDarkTheme()) Color(0xFFE6E1E5) else Color(0xFF1A1C1E)
@@ -139,6 +144,8 @@ fun NotchTheme(content: @Composable () -> Unit) {
 @Composable
 fun NotchApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var albumJob by remember { mutableStateOf<Job?>(null) }
     var player by remember { mutableStateOf<Player?>(null) }
     var settings by remember { mutableStateOf(NotchEngine.current()) }
     var clipName by remember { mutableStateOf("Nothing loaded") }
@@ -260,6 +267,43 @@ fun NotchApp() {
         current.setMediaItems(items, 0, 0L)
         current.prepare()
         current.play()
+    }
+
+    val addAlbum = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+        val current = player
+        if (treeUri == null || current == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: Exception) {
+        }
+        albumJob?.cancel()
+        albumJob = scope.launch {
+            val previousName = clipName
+            clipName = "Reading album…"
+            errorText = null
+            val tracks = AlbumScanner.collect(context, treeUri)
+            if (!isActive) return@launch
+            val sorted = AlbumOrder.sort(tracks)
+            if (sorted.isEmpty()) {
+                clipName = previousName
+                errorText = "No audio files in that folder."
+                return@launch
+            }
+            val items = sorted.map { it.toMediaItem() }
+            clipName = Playlist.trackTitle(
+                items.first().mediaMetadata.title,
+                items.first().localConfiguration?.uri?.lastPathSegment,
+            )
+            ensureNotificationPermission()
+            current.repeatMode = Player.REPEAT_MODE_OFF
+            current.shuffleModeEnabled = false
+            current.setMediaItems(items, 0, 0L)
+            current.prepare()
+            current.play()
+        }
     }
 
     fun push(next: NotchSettings) {
@@ -446,6 +490,12 @@ fun NotchApp() {
                     contentPadding = buttonPadding,
                 ) { Text("Next", textAlign = TextAlign.Center, maxLines = 1) }
             }
+            Button(
+                onClick = { addAlbum.launch(null) },
+                enabled = player != null,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            ) { Text("Add album", textAlign = TextAlign.Center, maxLines = 1) }
             Text(clipName, color = Muted)
             Playlist.positionLabel(queueIndex, queueCount)?.let { label ->
                 Text(label, color = Muted)
