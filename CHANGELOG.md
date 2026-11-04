@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4
+
+Dependency updates for the reported library bugs.
+
+- The player uses Guava 33.7.2-android. Media3 1.11.1 brought 33.3.1-android, which is covered by CVE-2026-102554.
+- The tools that package and sign the APK use the patched releases: Bouncy Castle 1.85, jose4j 0.9.6, JDOM 2.0.6.1, Commons Lang 3.18.0, and HttpClient 4.5.14.
+
+Playback is unchanged.
+
 ## 1.3
 
 Playlists.
