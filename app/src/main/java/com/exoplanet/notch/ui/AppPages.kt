@@ -46,6 +46,8 @@ internal enum class AppPage {
     Guide,
     About,
     Update,
+    Queue,
+    Playlists,
 }
 
 @Composable
@@ -53,7 +55,9 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
     val title = when (page) {
         AppPage.About -> "About"
         AppPage.Update -> "Update"
-        else -> "Guide"
+        AppPage.Queue -> "Queue"
+        AppPage.Playlists -> "Playlists"
+        AppPage.Guide, AppPage.Player -> "Guide"
     }
     Column(
         modifier = modifier
@@ -69,7 +73,8 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
         when (page) {
             AppPage.About -> AboutBody()
             AppPage.Update -> UpdateBody()
-            else -> GuideBody()
+            AppPage.Guide, AppPage.Player -> GuideBody()
+            AppPage.Queue, AppPage.Playlists -> Unit
         }
     }
 }
@@ -82,7 +87,7 @@ private fun AboutBody() {
         AboutRow("Version", version)
         AboutRow("Author", "Allen Jensen")
         Text(
-            "Notch plays audio you choose and cuts narrow bands out of it. The file stays on this phone. Update only downloads a newer release from GitHub.",
+            "Notch plays audio you choose and cuts narrow bands out of it. You can queue several files or an album and save that queue as a playlist. The files stay on this phone. Update only downloads a newer release from GitHub.",
             style = MaterialTheme.typography.bodyLarge,
             color = Ink,
         )

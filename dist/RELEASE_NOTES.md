@@ -1,7 +1,7 @@
-Signed release build of Notch 1.2.
+Notch 1.3 adds playlists.
 
-Package `com.exoplanet.notch`, version name 1.2, version code 3, target API 36.
+Add files in the order you pick them, or add an album folder. Albums split into CD1 and CD2 play by disc, then track number, then file name. The queue mixes files and albums: tap to jump, drag to reorder, and swipe to remove. Repeat cycles through off, all, and one.
 
-The menu has the listening guide, About, and Update. Update checks the public GitHub releases and installs a newer APK. Light and dark follow the phone setting.
+Save the queue by name. Load, rename, or delete it from Playlists. If a file was moved or deleted, that row is marked Unavailable and skipped. A missing album track stays in the list until the file is back in the folder.
 
-The APK is signed with the upload key.
+The in-app guide has a short Playlists section. The APK is signed with the upload key.
