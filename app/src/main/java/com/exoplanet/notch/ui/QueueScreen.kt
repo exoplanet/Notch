@@ -215,7 +215,8 @@ private fun QueueRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (highlighted) Teal.copy(alpha = 0.35f) else Panel, shape)
+                    .background(Panel, shape)
+                    .background(if (highlighted) Teal.copy(alpha = 0.35f) else Color.Transparent, shape)
                     .then(
                         if (onClick != null) {
                             Modifier.clickable(onClick = onClick)

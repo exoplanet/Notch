@@ -290,22 +290,66 @@ fun NotchApp() {
         playQueue = playQueue.moveEntry(from, to)
     }
 
+    fun resumeAfterRemoval(current: Player) {
+        if (current.mediaItemCount == 0 || current.isPlaying) return
+        when (current.playbackState) {
+            // Repeat-one has no successor except the item just removed, so ExoPlayer
+            // masks STATE_ENDED even when later items remain. play() is a no-op while
+            // playWhenReady is already true; a seek is what leaves ENDED.
+            Player.STATE_ENDED -> {
+                current.seekTo(current.currentMediaItemIndex.coerceAtLeast(0), 0L)
+                current.play()
+            }
+            Player.STATE_IDLE -> {
+                current.prepare()
+                current.play()
+            }
+            else -> current.play()
+        }
+    }
+
+    fun keepPlaying(current: Player, wasPlaying: Boolean) {
+        if (!wasPlaying || current.mediaItemCount == 0) return
+        resumeAfterRemoval(current)
+        val listener = object : Player.Listener {
+            var attempts = 0
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (current.isPlaying || current.mediaItemCount == 0 || attempts++ > 3) {
+                    current.removeListener(this)
+                    return
+                }
+                if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
+                    resumeAfterRemoval(current)
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) current.removeListener(this)
+            }
+        }
+        current.addListener(listener)
+    }
+
     fun removeQueueEntry(id: String) {
         val current = player ?: return
         val index = playQueue.entries.indexOfFirst { it.id == id }
         if (index < 0) return
+        val wasPlaying = current.playWhenReady
         val range = playQueue.mediaRange(index)
         current.removeMediaItems(range.first, range.last + 1)
         playQueue = playQueue.removeEntry(id)
         if (playQueue.entries.isEmpty()) clipName = "Nothing loaded"
+        else keepPlaying(current, wasPlaying)
     }
 
     fun removeQueueTrack(entryId: String, trackIndex: Int) {
         val current = player ?: return
         val flat = playQueue.flatten().firstOrNull { it.entryId == entryId && it.trackIndex == trackIndex } ?: return
+        val wasPlaying = current.playWhenReady
         current.removeMediaItems(flat.mediaIndex, flat.mediaIndex + 1)
         playQueue = playQueue.removeTrack(entryId, trackIndex)
         if (playQueue.entries.isEmpty()) clipName = "Nothing loaded"
+        else keepPlaying(current, wasPlaying)
     }
 
     fun applyDrag(entryId: String, proposedOffset: Float, heights: Map<String, Int>): Float {
