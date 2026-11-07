@@ -36,7 +36,7 @@ data class SavedLibrary(
 ) {
     fun saveNew(id: String, name: String, entries: List<PlaylistEntry>, now: Long): SavedLibrary? {
         val trimmed = name.trim()
-        if (trimmed.isEmpty() || id.isBlank() || entries.isEmpty()) return null
+        if (trimmed.isEmpty() || id.isBlank()) return null
         val created = SavedPlaylist(
             id = id,
             name = trimmed,

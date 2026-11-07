@@ -343,21 +343,6 @@ fun NotchApp() {
         }
     }
 
-    fun saveQueue(name: String) {
-        val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        val next = library.saveNew(id, name, playQueue.entries, now) ?: return
-        persistLibrary(next)
-        loadedId = id
-    }
-
-    fun updateLoadedPlaylist() {
-        val id = loadedId ?: return
-        val now = System.currentTimeMillis()
-        val next = library.updateEntries(id, playQueue.entries, now) ?: return
-        if (next != library) persistLibrary(next)
-    }
-
     fun dismissResume() {
         resumeOffer = null
         val next = library.clearResume()
@@ -628,10 +613,6 @@ fun NotchApp() {
                 onDragEntry = { entryId, offset, heights -> applyDrag(entryId, offset, heights) },
                 onRemoveEntry = { id -> removeQueueEntry(id) },
                 onRemoveTrack = { entryId, trackIndex -> removeQueueTrack(entryId, trackIndex) },
-                onSave = { name -> saveQueue(name) },
-                onUpdate = if (loadedId == null) null else {
-                    { updateLoadedPlaylist() }
-                },
                 modifier = Modifier.padding(padding),
             )
             return@Scaffold
@@ -640,9 +621,41 @@ fun NotchApp() {
             PlaylistsScreen(
                 playlists = library.playlists,
                 onBack = { page = AppPage.Player },
-                onLoad = { saved ->
-                    page = AppPage.Player
-                    loadSaved(saved, startIndex = 0, startPositionMs = 0L)
+                onNew = { name ->
+                    val next = library.saveNew(UUID.randomUUID().toString(), name, emptyList(), System.currentTimeMillis()) ?: return@PlaylistsScreen
+                    if (next != library) persistLibrary(next)
+                },
+                onPlay = { saved ->
+                    loadSaved(saved, 0, 0L)
+                },
+                onAddToQueue = suspend { saved ->
+                    val current = player ?: return@PlaylistsScreen
+                    if (saved.entries.isEmpty()) return@PlaylistsScreen
+                    val refreshed = withContext(Dispatchers.IO) {
+                        PlaylistRefresh.refresh(
+                            saved.entries,
+                            scan = { tree ->
+                                val uri = runCatching { Uri.parse(tree) }.getOrNull()
+                                if (uri == null) AlbumScanResult.Failed
+                                else AlbumScanner.scan(context, uri)
+                            },
+                            canRead = { PlaylistStore.canRead(context, it) },
+                        )
+                    }
+                    val flat = Playlist(refreshed).flatten()
+                    if (flat.isEmpty()) return@PlaylistsScreen
+                    val items = flat.map { it.toMediaItem() }
+                    val wasPlaying = current.playWhenReady
+                    current.shuffleModeEnabled = false
+                    if (current.mediaItemCount == 0) {
+                        clipName = flat.first().title
+                        current.setMediaItems(items, 0, 0L)
+                        current.prepare()
+                        current.play()
+                    } else {
+                        current.addMediaItems(items)
+                    }
+                    playQueue = playQueue.appendAll(refreshed)
                 },
                 onRename = { id, name ->
                     val next = library.rename(id, name, System.currentTimeMillis()) ?: return@PlaylistsScreen

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -18,28 +19,47 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.exoplanet.notch.SavedPlaylist
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun PlaylistsScreen(
     playlists: List<SavedPlaylist>,
     onBack: () -> Unit,
-    onLoad: (SavedPlaylist) -> Unit,
+    onNew: (String) -> Unit,
+    onPlay: (SavedPlaylist) -> Unit,
+    onAddToQueue: suspend (SavedPlaylist) -> Unit,
     onRename: (id: String, name: String) -> Unit,
     onDelete: (id: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var renameTarget by remember { mutableStateOf<SavedPlaylist?>(null) }
     var deleteTarget by remember { mutableStateOf<SavedPlaylist?>(null) }
+    var newTarget by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val ordered = playlists.sortedByDescending { it.updatedAt }
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        TextButton(onClick = onBack) { Text("Back") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(onClick = onBack) { Text("Back") }
+            Button(
+                onClick = { newTarget = "New playlist" },
+                modifier = Modifier.weight(1.35f),
+            ) {
+                Text("New playlist", textAlign = TextAlign.Center, maxLines = 2)
+            }
+        }
         Text("Playlists", style = MaterialTheme.typography.headlineMedium, color = Ink)
         if (ordered.isEmpty()) {
             Text(
@@ -59,7 +79,14 @@ internal fun PlaylistsScreen(
                         Text(playlist.name, color = Ink, style = MaterialTheme.typography.titleMedium)
                         Text(trackLabel(playlist.trackCount()), color = Muted, style = MaterialTheme.typography.bodyMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(onClick = { onLoad(playlist) }) { Text("Load") }
+                            TextButton(onClick = { onPlay(playlist) }) { Text("Play") }
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        onAddToQueue(playlist)
+                                    }
+                                },
+                            ) { Text("Add to queue") }
                             TextButton(onClick = { renameTarget = playlist }) { Text("Rename") }
                             TextButton(onClick = { deleteTarget = playlist }) { Text("Delete") }
                         }
@@ -67,6 +94,19 @@ internal fun PlaylistsScreen(
                 }
             }
         }
+    }
+    newTarget?.let { label ->
+        NameDialog(
+            title = label,
+            initial = "Untitled",
+            confirmLabel = "Create",
+            onDismiss = { newTarget = null },
+            onConfirm = { name ->
+                newTarget = null
+                val trimmed = name.trim()
+                if (trimmed.isNotEmpty()) onNew(trimmed)
+            },
+        )
     }
     renameTarget?.let { playlist ->
         NameDialog(
@@ -76,7 +116,8 @@ internal fun PlaylistsScreen(
             onDismiss = { renameTarget = null },
             onConfirm = { name ->
                 renameTarget = null
-                onRename(playlist.id, name)
+                val trimmed = name.trim()
+                if (trimmed.isNotEmpty()) onRename(playlist.id, trimmed)
             },
         )
     }

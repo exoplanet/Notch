@@ -48,11 +48,8 @@ internal fun QueueScreen(
     onDragEntry: (entryId: String, proposedOffset: Float, heights: Map<String, Int>) -> Float,
     onRemoveEntry: (String) -> Unit,
     onRemoveTrack: (String, Int) -> Unit,
-    onSave: (String) -> Unit,
-    onUpdate: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    var saveOpen by remember { mutableStateOf(false) }
     var dragId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val heights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
@@ -67,16 +64,7 @@ internal fun QueueScreen(
         TextButton(onClick = onBack) { Text("Back") }
         Text("Queue", style = MaterialTheme.typography.headlineMedium, color = Ink)
         if (!loadedName.isNullOrBlank()) {
-            Text(loadedName, color = Muted, style = MaterialTheme.typography.bodyLarge)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(
-                onClick = { saveOpen = true },
-                enabled = entries.isNotEmpty(),
-            ) { Text("Save as playlist") }
-            if (onUpdate != null) {
-                TextButton(onClick = onUpdate) { Text("Update playlist") }
-            }
+            Text("Playing playlist: $loadedName", color = Muted, style = MaterialTheme.typography.bodyLarge)
         }
         val unavailable = entries.sumOf { entry ->
             when (entry) {
@@ -173,18 +161,6 @@ internal fun QueueScreen(
                 }
             }
         }
-    }
-    if (saveOpen) {
-        NameDialog(
-            title = "Save as playlist",
-            initial = loadedName.orEmpty(),
-            confirmLabel = "Save",
-            onDismiss = { saveOpen = false },
-            onConfirm = { name ->
-                saveOpen = false
-                onSave(name)
-            },
-        )
     }
 }
 
