@@ -78,6 +78,35 @@ data class SavedLibrary(
 
     fun clearResume(): SavedLibrary = if (resume == null) this else copy(resume = null)
 
+    /**
+     * Creates or replaces one playlist. URIs dropped from an existing playlist are
+     * returned when no remaining playlist still uses them.
+     */
+    fun commitPlaylist(
+        id: String,
+        name: String,
+        entries: List<PlaylistEntry>,
+        now: Long,
+    ): LibraryWrite? {
+        if (id.isBlank()) return null
+        val existing = playlists.find { it.id == id }
+        val before = existing?.let { PlaylistUris.collect(it) }.orEmpty()
+        val next = if (existing == null) {
+            saveNew(id, name, entries, now) ?: return null
+        } else {
+            val withEntries = updateEntries(id, entries, now) ?: return null
+            withEntries.rename(id, name, now) ?: return null
+        }
+        val stillUsed = next.playlists.flatMap { PlaylistUris.collect(it) }.toSet()
+        return LibraryWrite(next, before - stillUsed)
+    }
+
+    /** URIs in a draft that are not already stored in this library. */
+    fun urisOnlyInDraft(draft: List<PlaylistEntry>): Set<String> {
+        val saved = playlists.flatMap { PlaylistUris.collect(it) }.toSet()
+        return PlaylistUris.collect(draft) - saved
+    }
+
     private fun upsert(playlist: SavedPlaylist): SavedLibrary {
         val index = playlists.indexOfFirst { it.id == playlist.id }
         val next = if (index < 0) {
@@ -90,6 +119,11 @@ data class SavedLibrary(
 }
 
 data class LibraryDeletion(
+    val library: SavedLibrary,
+    val releasedUris: Set<String>,
+)
+
+data class LibraryWrite(
     val library: SavedLibrary,
     val releasedUris: Set<String>,
 )
