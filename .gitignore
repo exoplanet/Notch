@@ -8,6 +8,8 @@
 captures/
 *.apk
 !dist/*.apk
+test-results/
+dist/notch-1.0.apk
 *.aab
 keystore.properties
 *.jks

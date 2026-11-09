@@ -90,6 +90,7 @@ import com.exoplanet.notch.Playlist
 import com.exoplanet.notch.PlaylistEntry
 import com.exoplanet.notch.PlaylistRefresh
 import com.exoplanet.notch.PlaylistStore
+import com.exoplanet.notch.PlaylistUris
 import com.exoplanet.notch.ResumePoint
 import com.exoplanet.notch.SavedLibrary
 import com.exoplanet.notch.SavedPlaylist
@@ -98,7 +99,6 @@ import com.exoplanet.notch.TrackTags
 import com.exoplanet.notch.toMediaItem
 import com.exoplanet.notch.dsp.NotchBand
 import com.exoplanet.notch.dsp.NotchSettings
-import com.exoplanet.notch.testNoiseUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -179,7 +179,8 @@ fun NotchApp() {
     var loadedId by remember { mutableStateOf<String?>(null) }
     var resumeOffer by remember { mutableStateOf<ResumePoint?>(null) }
     var repeatMode by remember { mutableIntStateOf(Player.REPEAT_MODE_OFF) }
-    BackHandler(enabled = page != AppPage.Player) { page = AppPage.Player }
+    var editor by remember { mutableStateOf<PlaylistDraft?>(null) }
+    var editorMessage by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(context) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -343,21 +344,6 @@ fun NotchApp() {
         }
     }
 
-    fun saveQueue(name: String) {
-        val id = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        val next = library.saveNew(id, name, playQueue.entries, now) ?: return
-        persistLibrary(next)
-        loadedId = id
-    }
-
-    fun updateLoadedPlaylist() {
-        val id = loadedId ?: return
-        val now = System.currentTimeMillis()
-        val next = library.updateEntries(id, playQueue.entries, now) ?: return
-        if (next != library) persistLibrary(next)
-    }
-
     fun dismissResume() {
         resumeOffer = null
         val next = library.clearResume()
@@ -510,37 +496,6 @@ fun NotchApp() {
         repeatMode = next
     }
 
-    val openAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null || player == null) return@rememberLauncherForActivityResult
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        } catch (_: Exception) {
-        }
-        albumJob?.cancel()
-        albumJob = scope.launch {
-            val name = displayName(context, uri)
-            val tags = withContext(Dispatchers.IO) {
-                runCatching { TrackMetadataReader.read(context, uri) }.getOrDefault(TrackTags())
-            }
-            if (!isActive) return@launch
-            val title = tags.title?.takeIf { it.isNotBlank() } ?: name
-            replaceQueue(
-                listOf(
-                    PlaylistEntry.SingleFile(
-                        id = UUID.randomUUID().toString(),
-                        uri = uri.toString(),
-                        metadata = tags.copy(title = title),
-                    ),
-                ),
-                repeat = Player.REPEAT_MODE_OFF,
-                label = title,
-            )
-        }
-    }
-
     val addFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty() || player == null) return@rememberLauncherForActivityResult
         uris.forEach { uri ->
@@ -607,6 +562,102 @@ fun NotchApp() {
         }
     }
 
+    fun releaseIfUnused(uris: Set<String>) {
+        val saved = library.playlists.flatMap { PlaylistUris.collect(it) }.toSet()
+        val playing = PlaylistUris.collect(playQueue.entries)
+        PlaylistStore.release(context, uris - saved - playing)
+    }
+
+    fun cancelEditor() {
+        val draft = editor ?: return
+        releaseIfUnused(library.urisOnlyInDraft(draft.entries))
+        editor = null
+        editorMessage = null
+    }
+
+    BackHandler(enabled = page != AppPage.Player || editor != null) {
+        if (editor != null) cancelEditor() else page = AppPage.Player
+    }
+
+    fun saveEditor() {
+        val draft = editor ?: return
+        val written = library.commitPlaylist(
+            draft.id,
+            draft.name,
+            draft.entries,
+            System.currentTimeMillis(),
+        ) ?: return
+        if (written.library != library) persistLibrary(written.library)
+        releaseIfUnused(written.releasedUris)
+        editor = null
+        editorMessage = null
+    }
+
+    fun removeEditorEntry(id: String) {
+        val draft = editor ?: return
+        val removed = draft.entries.find { it.id == id } ?: return
+        val remaining = draft.entries.filterNot { it.id == id }
+        editor = draft.copy(entries = remaining)
+        val stillInDraft = PlaylistUris.collect(remaining)
+        releaseIfUnused(PlaylistUris.collect(listOf(removed)) - stillInDraft)
+    }
+
+    fun appendEditor(draftId: String, more: List<PlaylistEntry>) {
+        val current = editor ?: return
+        if (current.id != draftId) {
+            releaseIfUnused(PlaylistUris.collect(more))
+            return
+        }
+        editor = current.copy(entries = current.entries + more)
+        editorMessage = null
+    }
+
+    val addEditorTracks = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        val draftId = editor?.id ?: return@rememberLauncherForActivityResult
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        uris.forEach { takeReadPermission(context, it) }
+        scope.launch {
+            val entries = withContext(Dispatchers.IO) {
+                uris.map { uri -> singleFileEntry(context, uri) }
+            }
+            if (!isActive) return@launch
+            appendEditor(draftId, entries)
+        }
+    }
+
+    val addEditorAlbum = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { treeUri ->
+        val draftId = editor?.id ?: return@rememberLauncherForActivityResult
+        if (treeUri == null) return@rememberLauncherForActivityResult
+        takeReadPermission(context, treeUri)
+        scope.launch {
+            val tracks = AlbumScanner.collect(context, treeUri)
+            if (!isActive) return@launch
+            if (tracks.isEmpty()) {
+                if (editor?.id == draftId) editorMessage = "No audio files in that folder."
+                releaseIfUnused(setOf(treeUri.toString()))
+                return@launch
+            }
+            val albumTitle = tracks.firstNotNullOfOrNull { it.album?.trim()?.takeIf { name -> name.isNotEmpty() } }
+                ?: treeDisplayName(context, treeUri)
+                ?: "Album"
+            appendEditor(
+                draftId,
+                listOf(
+                    PlaylistEntry.Album(
+                        id = UUID.randomUUID().toString(),
+                        treeUri = treeUri.toString(),
+                        title = albumTitle,
+                        tracks = tracks,
+                    ),
+                ),
+            )
+        }
+    }
+
     fun push(next: NotchSettings) {
         settings = next
         NotchEngine.replace(next)
@@ -628,10 +679,6 @@ fun NotchApp() {
                 onDragEntry = { entryId, offset, heights -> applyDrag(entryId, offset, heights) },
                 onRemoveEntry = { id -> removeQueueEntry(id) },
                 onRemoveTrack = { entryId, trackIndex -> removeQueueTrack(entryId, trackIndex) },
-                onSave = { name -> saveQueue(name) },
-                onUpdate = if (loadedId == null) null else {
-                    { updateLoadedPlaylist() }
-                },
                 modifier = Modifier.padding(padding),
             )
             return@Scaffold
@@ -639,10 +686,59 @@ fun NotchApp() {
         if (page == AppPage.Playlists) {
             PlaylistsScreen(
                 playlists = library.playlists,
+                editor = editor,
+                editorMessage = editorMessage,
                 onBack = { page = AppPage.Player },
-                onLoad = { saved ->
-                    page = AppPage.Player
-                    loadSaved(saved, startIndex = 0, startPositionMs = 0L)
+                onStartNew = {
+                    editor = PlaylistDraft(
+                        id = UUID.randomUUID().toString(),
+                        isNew = true,
+                        name = "",
+                        entries = emptyList(),
+                    )
+                    editorMessage = null
+                },
+                onStartEdit = { saved ->
+                    editor = PlaylistDraft(
+                        id = saved.id,
+                        isNew = false,
+                        name = saved.name,
+                        entries = saved.entries,
+                    )
+                    editorMessage = null
+                },
+                onPlay = { saved ->
+                    loadSaved(saved, 0, 0L)
+                },
+                onAddToQueue = suspend { saved ->
+                    val current = player ?: return@PlaylistsScreen
+                    if (saved.entries.isEmpty()) return@PlaylistsScreen
+                    val refreshed = withContext(Dispatchers.IO) {
+                        PlaylistRefresh.refresh(
+                            saved.entries,
+                            scan = { tree ->
+                                val uri = runCatching { Uri.parse(tree) }.getOrNull()
+                                if (uri == null) AlbumScanResult.Failed
+                                else AlbumScanner.scan(context, uri)
+                            },
+                            canRead = { PlaylistStore.canRead(context, it) },
+                        )
+                    }
+                    val queued = refreshed.map { it.withNewId() }
+                    val flat = Playlist(queued).flatten()
+                    if (flat.isEmpty()) return@PlaylistsScreen
+                    val items = flat.map { it.toMediaItem() }
+                    val wasPlaying = current.playWhenReady
+                    current.shuffleModeEnabled = false
+                    if (current.mediaItemCount == 0) {
+                        clipName = flat.first().title
+                        current.setMediaItems(items, 0, 0L)
+                        current.prepare()
+                        current.play()
+                    } else {
+                        current.addMediaItems(items)
+                    }
+                    playQueue = playQueue.appendAll(queued)
                 },
                 onRename = { id, name ->
                     val next = library.rename(id, name, System.currentTimeMillis()) ?: return@PlaylistsScreen
@@ -653,8 +749,16 @@ fun NotchApp() {
                     if (loadedId == id) loadedId = null
                     if (resumeOffer?.playlistId == id) resumeOffer = null
                     persistLibrary(deletion.library)
-                    PlaylistStore.release(context, deletion.releasedUris)
+                    PlaylistStore.release(context, deletion.releasedUris - PlaylistUris.collect(playQueue.entries))
                 },
+                onEditorName = { name ->
+                    editor = editor?.copy(name = name)
+                },
+                onAddEditorTracks = { addEditorTracks.launch(arrayOf("audio/*")) },
+                onAddEditorAlbum = { addEditorAlbum.launch(null) },
+                onRemoveEditorEntry = { id -> removeEditorEntry(id) },
+                onSaveEditor = { saveEditor() },
+                onCancelEditor = { cancelEditor() },
                 modifier = Modifier.padding(padding),
             )
             return@Scaffold
@@ -809,52 +913,13 @@ fun NotchApp() {
                 val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
                     onClick = {
-                        albumJob?.cancel()
-                        albumJob = null
-                        replaceQueue(
-                            listOf(
-                                PlaylistEntry.SingleFile(
-                                    id = UUID.randomUUID().toString(),
-                                    uri = testNoiseUri(context).toString(),
-                                    metadata = TrackTags(title = "Test noise"),
-                                ),
-                            ),
-                            repeat = Player.REPEAT_MODE_ONE,
-                            label = "Test noise",
-                        )
-                    },
-                    enabled = player != null,
-                    modifier = Modifier.weight(1.35f),
-                    contentPadding = buttonPadding,
-                ) { Text("Play test noise", textAlign = TextAlign.Center, maxLines = 2) }
-                Button(
-                    onClick = { openAudio.launch(arrayOf("audio/*")) },
-                    enabled = player != null,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = buttonPadding,
-                ) { Text("Open audio", textAlign = TextAlign.Center, maxLines = 2) }
-                Button(
-                    onClick = {
                         val current = player ?: return@Button
                         if (current.isPlaying) current.pause() else current.play()
                     },
                     enabled = player != null && durationMs > 0L,
-                    modifier = Modifier.weight(0.75f),
-                    contentPadding = buttonPadding,
-                ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                Button(
-                    onClick = { addFiles.launch(arrayOf("audio/*")) },
-                    enabled = player != null,
                     modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
-                ) { Text("Add files", textAlign = TextAlign.Center, maxLines = 2) }
+                ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
                 Button(
                     onClick = { player?.seekToPreviousMediaItem() },
                     enabled = player != null && hasPrevious,
@@ -875,14 +940,20 @@ fun NotchApp() {
             ) {
                 val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
+                    onClick = { addFiles.launch(arrayOf("audio/*")) },
+                    enabled = player != null,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Add tracks", textAlign = TextAlign.Center, maxLines = 1) }
+                Button(
                     onClick = { addAlbum.launch(null) },
                     enabled = player != null,
-                    modifier = Modifier.weight(1.4f),
+                    modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
-                ) { Text("Add album", textAlign = TextAlign.Center, maxLines = 1) }
+                ) { Text("Add albums", textAlign = TextAlign.Center, maxLines = 1) }
                 Button(
                     onClick = { page = AppPage.Queue },
-                    modifier = Modifier.weight(0.8f),
+                    modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
                 ) { Text("Queue", textAlign = TextAlign.Center, maxLines = 1) }
             }
@@ -1099,6 +1170,26 @@ private fun sanitizeAmount(raw: String, maxDigits: Int, decimalPlaces: Int): Str
 
 private fun List<NotchBand>.replace(index: Int, band: NotchBand): List<NotchBand> {
     return mapIndexed { i, existing -> if (i == index) band else existing }
+}
+
+private fun takeReadPermission(context: Context, uri: Uri) {
+    try {
+        context.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+    } catch (_: Exception) {
+    }
+}
+
+private suspend fun singleFileEntry(context: Context, uri: Uri): PlaylistEntry.SingleFile {
+    val tags = runCatching { TrackMetadataReader.read(context, uri) }.getOrDefault(TrackTags())
+    val name = displayName(context, uri)
+    return PlaylistEntry.SingleFile(
+        id = UUID.randomUUID().toString(),
+        uri = uri.toString(),
+        metadata = tags.copy(title = tags.title?.takeIf { it.isNotBlank() } ?: name),
+    )
 }
 
 private fun treeDisplayName(context: Context, treeUri: Uri): String? {

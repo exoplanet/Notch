@@ -1,5 +1,7 @@
 package com.exoplanet.notch
 
+import java.util.UUID
+
 class Playlist(
     val entries: List<PlaylistEntry> = emptyList(),
 ) {
@@ -118,6 +120,15 @@ class Playlist(
 sealed class PlaylistEntry {
     abstract val id: String
     abstract val mediaCount: Int
+
+    /** A queue copy. Saved playlists keep their own ids, so the same playlist can be queued twice. */
+    fun withNewId(): PlaylistEntry {
+        val next = UUID.randomUUID().toString()
+        return when (this) {
+            is SingleFile -> copy(id = next)
+            is Album -> copy(id = next)
+        }
+    }
 
     data class SingleFile(
         override val id: String,

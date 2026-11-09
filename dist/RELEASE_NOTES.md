@@ -1,5 +1,7 @@
-Notch 1.4 updates libraries with reported security bugs.
+Notch 1.5 lets you build and edit named playlists.
 
-The player uses a patched Guava. The tools that package and sign the APK use patched Bouncy Castle, jose4j, JDOM, Commons Lang, and HttpClient.
+New playlist takes a name, tracks, and albums before it is saved. Edit adds or removes them. Each playlist has a menu for Play, Add to queue, Edit, Rename, and Delete. The same playlist can be queued more than once.
 
-Playback is unchanged. The APK is signed with the upload key.
+The player shows Play, Previous, and Next, then Add tracks, Add albums, and Queue.
+
+The APK is signed with the upload key.
