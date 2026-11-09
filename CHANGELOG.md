@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5
+
+Playlists you can fill and edit, and a simpler player.
+
+- New playlist takes a name, tracks, and albums before it is saved. Edit adds or removes tracks and albums.
+- Each playlist has a menu: Play, Add to queue, Edit, Rename, and Delete.
+- The same playlist can be added to the queue more than once.
+- The player buttons are Play, Previous, and Next, then Add tracks, Add albums, and Queue.
+- Play test noise and Open audio are removed.
+
 ## 1.4
 
 Dependency updates for the reported library bugs.

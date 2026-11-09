@@ -99,7 +99,6 @@ import com.exoplanet.notch.TrackTags
 import com.exoplanet.notch.toMediaItem
 import com.exoplanet.notch.dsp.NotchBand
 import com.exoplanet.notch.dsp.NotchSettings
-import com.exoplanet.notch.testNoiseUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -495,37 +494,6 @@ fun NotchApp() {
         }
         current.repeatMode = next
         repeatMode = next
-    }
-
-    val openAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null || player == null) return@rememberLauncherForActivityResult
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        } catch (_: Exception) {
-        }
-        albumJob?.cancel()
-        albumJob = scope.launch {
-            val name = displayName(context, uri)
-            val tags = withContext(Dispatchers.IO) {
-                runCatching { TrackMetadataReader.read(context, uri) }.getOrDefault(TrackTags())
-            }
-            if (!isActive) return@launch
-            val title = tags.title?.takeIf { it.isNotBlank() } ?: name
-            replaceQueue(
-                listOf(
-                    PlaylistEntry.SingleFile(
-                        id = UUID.randomUUID().toString(),
-                        uri = uri.toString(),
-                        metadata = tags.copy(title = title),
-                    ),
-                ),
-                repeat = Player.REPEAT_MODE_OFF,
-                label = title,
-            )
-        }
     }
 
     val addFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -945,52 +913,13 @@ fun NotchApp() {
                 val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
                     onClick = {
-                        albumJob?.cancel()
-                        albumJob = null
-                        replaceQueue(
-                            listOf(
-                                PlaylistEntry.SingleFile(
-                                    id = UUID.randomUUID().toString(),
-                                    uri = testNoiseUri(context).toString(),
-                                    metadata = TrackTags(title = "Test noise"),
-                                ),
-                            ),
-                            repeat = Player.REPEAT_MODE_ONE,
-                            label = "Test noise",
-                        )
-                    },
-                    enabled = player != null,
-                    modifier = Modifier.weight(1.35f),
-                    contentPadding = buttonPadding,
-                ) { Text("Play test noise", textAlign = TextAlign.Center, maxLines = 2) }
-                Button(
-                    onClick = { openAudio.launch(arrayOf("audio/*")) },
-                    enabled = player != null,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = buttonPadding,
-                ) { Text("Open audio", textAlign = TextAlign.Center, maxLines = 2) }
-                Button(
-                    onClick = {
                         val current = player ?: return@Button
                         if (current.isPlaying) current.pause() else current.play()
                     },
                     enabled = player != null && durationMs > 0L,
-                    modifier = Modifier.weight(0.75f),
-                    contentPadding = buttonPadding,
-                ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                Button(
-                    onClick = { addFiles.launch(arrayOf("audio/*")) },
-                    enabled = player != null,
                     modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
-                ) { Text("Add files", textAlign = TextAlign.Center, maxLines = 2) }
+                ) { Text(if (isPlaying) "Pause" else "Play", maxLines = 1) }
                 Button(
                     onClick = { player?.seekToPreviousMediaItem() },
                     enabled = player != null && hasPrevious,
@@ -1011,14 +940,20 @@ fun NotchApp() {
             ) {
                 val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 Button(
+                    onClick = { addFiles.launch(arrayOf("audio/*")) },
+                    enabled = player != null,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = buttonPadding,
+                ) { Text("Add tracks", textAlign = TextAlign.Center, maxLines = 1) }
+                Button(
                     onClick = { addAlbum.launch(null) },
                     enabled = player != null,
-                    modifier = Modifier.weight(1.4f),
+                    modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
-                ) { Text("Add album", textAlign = TextAlign.Center, maxLines = 1) }
+                ) { Text("Add albums", textAlign = TextAlign.Center, maxLines = 1) }
                 Button(
                     onClick = { page = AppPage.Queue },
-                    modifier = Modifier.weight(0.8f),
+                    modifier = Modifier.weight(1f),
                     contentPadding = buttonPadding,
                 ) { Text("Queue", textAlign = TextAlign.Center, maxLines = 1) }
             }
