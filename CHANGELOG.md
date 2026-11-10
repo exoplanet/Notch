@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6
+
+Match a frequency in the app, and set a quarter-octave width.
+
+- Menu, then Match, plays a quiet sine or a narrow noise. The tone does not pass through the notches.
+- Lower and higher play the octave beside the match. The frequency stays until you tap Keep.
+- Writing a frequency into a notch sets that center and turns the notch on.
+- Width still runs from 0.10 to 1.00 octave. The buttons step by 0.05, so 0.25 can be set. A value can also be typed.
+- The tools that package and sign the APK use Bouncy Castle 1.86. That release fixes CVE-2026-71891, which still affects 1.85.
+
 ## 1.5
 
 Playlists you can fill and edit, and a simpler player.

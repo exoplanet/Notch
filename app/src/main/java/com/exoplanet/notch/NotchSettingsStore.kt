@@ -11,12 +11,18 @@ import com.exoplanet.notch.dsp.NotchSettings
  */
 internal class NotchSettingsStore(private val preferences: SharedPreferences) {
     fun read(): NotchSettings {
-        if (!preferences.contains(KEY_BANDWIDTH)) return NotchSettings()
+        val hundredths = when {
+            preferences.contains(KEY_BANDWIDTH_HUNDREDTHS) -> preferences.getInt(
+                KEY_BANDWIDTH_HUNDREDTHS,
+                NotchSettings.DEFAULT_BANDWIDTH_HUNDREDTHS,
+            )
+            preferences.contains(KEY_BANDWIDTH_TENTHS) -> NotchSettings.hundredthsFromLegacyTenths(
+                preferences.getInt(KEY_BANDWIDTH_TENTHS, 1),
+            )
+            else -> return NotchSettings()
+        }
         return NotchSettings(
-            bandwidthTenths = preferences.getInt(
-                KEY_BANDWIDTH,
-                NotchSettings.DEFAULT_BANDWIDTH_TENTHS,
-            ),
+            bandwidthHundredths = hundredths,
             bands = List(NotchSettings.COUNT) { index ->
                 val fallback = NotchSettings.DEFAULT_BANDS[index]
                 NotchBand(
@@ -30,7 +36,8 @@ internal class NotchSettingsStore(private val preferences: SharedPreferences) {
     fun write(settings: NotchSettings) {
         val stored = settings.normalized()
         val editor = preferences.edit()
-        editor.putInt(KEY_BANDWIDTH, stored.bandwidthTenths)
+        editor.putInt(KEY_BANDWIDTH_HUNDREDTHS, stored.bandwidthHundredths)
+        editor.putInt(KEY_BANDWIDTH_TENTHS, NotchSettings.legacyTenths(stored.bandwidthHundredths))
         stored.bands.forEachIndexed { index, band ->
             editor.putBoolean(enabledKey(index), band.enabled)
             editor.putInt(frequencyKey(index), band.frequencyHz)
@@ -40,7 +47,8 @@ internal class NotchSettingsStore(private val preferences: SharedPreferences) {
 
     companion object {
         private const val PREFS_NAME = "notch-settings"
-        private const val KEY_BANDWIDTH = "bandwidth_tenths"
+        private const val KEY_BANDWIDTH_HUNDREDTHS = "bandwidth_hundredths"
+        private const val KEY_BANDWIDTH_TENTHS = "bandwidth_tenths"
 
         fun open(context: Context): NotchSettingsStore {
             return NotchSettingsStore(

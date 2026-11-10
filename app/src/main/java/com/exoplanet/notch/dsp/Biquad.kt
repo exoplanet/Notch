@@ -12,21 +12,22 @@ data class NotchBand(
 )
 
 /**
- * Four independent notches. [bandwidthTenths] is the shared width in tenths of an octave
- * (1 is 0.1 octave, 10 is 1.0 octave). Each notch converts that fraction into hertz
- * from its own center. An enabled notch removes its center frequency completely.
+ * Four independent notches. [bandwidthHundredths] is the shared width in hundredths of an
+ * octave (10 is 0.10 octave, 25 is 0.25, 100 is 1.00). Each notch converts that fraction
+ * into hertz from its own center. An enabled notch removes its center frequency completely.
  */
 data class NotchSettings(
-    val bandwidthTenths: Int = DEFAULT_BANDWIDTH_TENTHS,
+    val bandwidthHundredths: Int = DEFAULT_BANDWIDTH_HUNDREDTHS,
     val bands: List<NotchBand> = DEFAULT_BANDS,
 ) {
     companion object {
         const val COUNT = 4
         const val MIN_HZ = 500
         const val MAX_HZ = 10_000
-        const val MIN_BANDWIDTH_TENTHS = 1
-        const val MAX_BANDWIDTH_TENTHS = 10
-        const val DEFAULT_BANDWIDTH_TENTHS = 1
+        const val MIN_BANDWIDTH_HUNDREDTHS = 10
+        const val MAX_BANDWIDTH_HUNDREDTHS = 100
+        const val DEFAULT_BANDWIDTH_HUNDREDTHS = 10
+        const val BANDWIDTH_STEP_HUNDREDTHS = 5
 
         val DEFAULT_BANDS: List<NotchBand> = listOf(
             NotchBand(frequencyHz = 1_000),
@@ -35,12 +36,20 @@ data class NotchSettings(
             NotchBand(frequencyHz = 10_000),
         )
 
+        /** Older installs stored the width in tenths of an octave. 5 was 0.5. */
+        fun hundredthsFromLegacyTenths(tenths: Int): Int = tenths * 10
+
+        /** Rounded tenth kept so an older build can still open the saved notches. */
+        fun legacyTenths(hundredths: Int): Int {
+            return ((hundredths + 5) / 10).coerceIn(1, 10)
+        }
+
         /**
-         * Hertz between the geometric edges of [octaveTenths] / 10 octaves around [frequencyHz].
+         * Hertz between the geometric edges of [octaveHundredths] / 100 octaves around [frequencyHz].
          * A tenth of an octave at 1 kHz is about 69 Hz; the same fraction at 10 kHz is about 693 Hz.
          */
-        fun bandwidthHz(frequencyHz: Double, octaveTenths: Int): Double {
-            val octaves = octaveTenths.coerceIn(MIN_BANDWIDTH_TENTHS, MAX_BANDWIDTH_TENTHS) / 10.0
+        fun bandwidthHz(frequencyHz: Double, octaveHundredths: Int): Double {
+            val octaves = octaveHundredths.coerceIn(MIN_BANDWIDTH_HUNDREDTHS, MAX_BANDWIDTH_HUNDREDTHS) / 100.0
             val half = octaves / 2.0
             return frequencyHz * (2.0.pow(half) - 2.0.pow(-half))
         }
@@ -48,12 +57,12 @@ data class NotchSettings(
 
     /** Clamps the width and each center into the ranges the controls allow. */
     fun normalized(): NotchSettings {
-        val tenths = bandwidthTenths.coerceIn(MIN_BANDWIDTH_TENTHS, MAX_BANDWIDTH_TENTHS)
+        val hundredths = bandwidthHundredths.coerceIn(MIN_BANDWIDTH_HUNDREDTHS, MAX_BANDWIDTH_HUNDREDTHS)
         val normalizedBands = List(COUNT) { index ->
             val band = bands.getOrNull(index) ?: DEFAULT_BANDS[index]
             band.copy(frequencyHz = band.frequencyHz.coerceIn(MIN_HZ, MAX_HZ))
         }
-        return copy(bandwidthTenths = tenths, bands = normalizedBands)
+        return copy(bandwidthHundredths = hundredths, bands = normalizedBands)
     }
 }
 
@@ -71,9 +80,9 @@ data class BiquadCoefficients(
     companion object {
         val IDENTITY = BiquadCoefficients(1.0, 0.0, 0.0, 0.0, 0.0)
 
-        fun forBand(sampleRate: Int, band: NotchBand, bandwidthTenths: Int): BiquadCoefficients {
+        fun forBand(sampleRate: Int, band: NotchBand, bandwidthHundredths: Int): BiquadCoefficients {
             if (!band.enabled || sampleRate <= 0) return IDENTITY
-            val bandwidth = NotchSettings.bandwidthHz(band.frequencyHz.toDouble(), bandwidthTenths)
+            val bandwidth = NotchSettings.bandwidthHz(band.frequencyHz.toDouble(), bandwidthHundredths)
             return notch(sampleRate, band.frequencyHz.toDouble(), bandwidth)
         }
 

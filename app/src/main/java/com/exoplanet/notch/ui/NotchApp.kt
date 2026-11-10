@@ -664,6 +664,21 @@ fun NotchApp() {
     }
 
     Scaffold(containerColor = Background) { padding ->
+        if (page == AppPage.Match) {
+            MatchScreen(
+                bands = settings.bands,
+                onBack = { page = AppPage.Player },
+                onPauseMusic = { player?.pause() },
+                onUse = { index, hz ->
+                    val latest = NotchEngine.current()
+                    val band = latest.bands[index].copy(frequencyHz = hz, enabled = true)
+                    push(latest.copy(bands = latest.bands.replace(index, band)))
+                    page = AppPage.Player
+                },
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         if (page == AppPage.Queue) {
             QueueScreen(
                 playlist = playQueue,
@@ -798,6 +813,13 @@ fun NotchApp() {
                         containerColor = Panel,
                     ) {
                         DropdownMenuItem(
+                            text = { Text("Match") },
+                            onClick = {
+                                menuOpen = false
+                                page = AppPage.Match
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Playlists") },
                             onClick = {
                                 menuOpen = false
@@ -854,17 +876,18 @@ fun NotchApp() {
             }
             NumberRow(
                 label = "Width",
-                value = settings.bandwidthTenths,
-                min = NotchSettings.MIN_BANDWIDTH_TENTHS,
-                max = NotchSettings.MAX_BANDWIDTH_TENTHS,
+                value = settings.bandwidthHundredths,
+                min = NotchSettings.MIN_BANDWIDTH_HUNDREDTHS,
+                max = NotchSettings.MAX_BANDWIDTH_HUNDREDTHS,
+                stepSize = NotchSettings.BANDWIDTH_STEP_HUNDREDTHS,
                 maxDigits = 4,
-                decimalPlaces = 1,
+                decimalPlaces = 2,
                 showUnit = true,
                 unit = "oct",
                 accelerate = false,
                 onValue = { next ->
                     val latest = NotchEngine.current()
-                    if (latest.bandwidthTenths != next) push(latest.copy(bandwidthTenths = next))
+                    if (latest.bandwidthHundredths != next) push(latest.copy(bandwidthHundredths = next))
                 },
             )
             Row(
@@ -991,7 +1014,7 @@ fun NotchApp() {
 }
 
 @Composable
-private fun NumberRow(
+internal fun NumberRow(
     value: Int,
     min: Int,
     max: Int,
@@ -1000,6 +1023,7 @@ private fun NumberRow(
     label: String? = null,
     showUnit: Boolean = false,
     unit: String = "Hz",
+    stepSize: Int = 1,
     decimalPlaces: Int = 0,
     accelerate: Boolean = true,
     enabled: Boolean? = null,
@@ -1025,7 +1049,7 @@ private fun NumberRow(
 
     fun step(delta: Int) {
         val base = parseAmount(draft.value, decimalPlaces) ?: currentValue
-        val clamped = (base + delta).coerceIn(min, max)
+        val clamped = (base + delta * stepSize).coerceIn(min, max)
         draft.value = show(clamped)
         if (clamped != currentValue) applyLatest(clamped)
     }
