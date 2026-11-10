@@ -2,7 +2,7 @@
 
 Android player that removes chosen frequencies from audio it plays.
 
-You can add tracks or an album folder. Files and albums share one queue. Named playlists are under Menu, then Playlists. The listening guide is under Menu, then Guide. The same text is in [GUIDE.md](GUIDE.md). Version history is in [CHANGELOG.md](CHANGELOG.md).
+You can add tracks or an album folder. Files and albums share one queue. Menu, then Match, plays a quiet tone and writes that frequency into a notch. Named playlists are under Menu, then Playlists. The listening guide is under Menu, then Guide. The same text is in [GUIDE.md](GUIDE.md). Version history is in [CHANGELOG.md](CHANGELOG.md).
 
 The source is public. The latest build is at https://github.com/exoplanet/Notch/releases/latest.
 

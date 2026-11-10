@@ -13,7 +13,7 @@ A normal app on a stock S23 cannot insert a real notch into every other app's au
 - Package `com.exoplanet.notch`.
 - Open an audio file, or play a looping built-in test noise.
 - Four notches, all off on a first launch, under a “Center Frequency Hz” header centered on the frequency column. Frequencies start at 1, 2, 4, and 10 kHz. Width, on/off, and center frequencies are saved and restored on the next start. Each has a round on/off button, and more than one can be on. Frequency and width can be typed or stepped with − and + (frequency 500 Hz–10 kHz; holding steps faster). The frequency fields do not repeat the Hz unit.
-- Width starts at 0.1 octave and accepts 0.1–1.0 octave, in steps of 0.1. Each notch converts that fraction into hertz from its own center.
+- Width starts at 0.1 octave and accepts 0.1–1.0 octave. The − and + buttons step by 0.05, and a hundredth of an octave can be typed. Each notch converts that fraction into hertz from its own center.
 - Each enabled notch removes its center frequency completely. There is no depth control and no response graph.
 - Background playback through a media notification. The notches apply only to sound this app plays.
 

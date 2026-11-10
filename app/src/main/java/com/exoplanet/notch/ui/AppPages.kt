@@ -48,6 +48,7 @@ internal enum class AppPage {
     Update,
     Queue,
     Playlists,
+    Match,
 }
 
 @Composable
@@ -58,6 +59,7 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
         AppPage.Queue -> "Queue"
         AppPage.Playlists -> "Playlists"
         AppPage.Guide, AppPage.Player -> "Guide"
+        AppPage.Match -> "Match"
     }
     Column(
         modifier = modifier
@@ -74,7 +76,7 @@ internal fun AppPageScreen(page: AppPage, onBack: () -> Unit, modifier: Modifier
             AppPage.About -> AboutBody()
             AppPage.Update -> UpdateBody()
             AppPage.Guide, AppPage.Player -> GuideBody()
-            AppPage.Queue, AppPage.Playlists -> Unit
+            AppPage.Queue, AppPage.Playlists, AppPage.Match -> Unit
         }
     }
 }

@@ -29,7 +29,7 @@ class BiquadTest {
         val coefficients = BiquadCoefficients.forBand(
             sampleRate,
             NotchBand(enabled = false, frequencyHz = 2_000),
-            bandwidthTenths = 1,
+            bandwidthHundredths = 10,
         )
         assertEquals(0.0, BiquadCoefficients.magnitudeDb(sampleRate, 2_000.0, coefficients), 0.01)
     }
@@ -66,8 +66,8 @@ class BiquadTest {
 
     @Test
     fun tenthOfAnOctaveScalesWithCenterFrequency() {
-        val at1k = NotchSettings.bandwidthHz(1_000.0, 1)
-        val at10k = NotchSettings.bandwidthHz(10_000.0, 1)
+        val at1k = NotchSettings.bandwidthHz(1_000.0, 10)
+        val at10k = NotchSettings.bandwidthHz(10_000.0, 10)
         val factor = 2.0.pow(0.05) - 2.0.pow(-0.05)
         assertEquals(1_000.0 * factor, at1k, 0.01)
         assertEquals(at1k * 10.0, at10k, 0.01)
@@ -77,14 +77,14 @@ class BiquadTest {
     fun octaveEdgesSitNearMinusThreeDb() {
         val sampleRate = 48_000
         val center = 2_000.0
-        val tenths = 5
-        val octaves = tenths / 10.0
+        val hundredths = 50
+        val octaves = hundredths / 100.0
         val low = center / 2.0.pow(octaves / 2.0)
         val high = center * 2.0.pow(octaves / 2.0)
         val coefficients = BiquadCoefficients.notch(
             sampleRate,
             center,
-            NotchSettings.bandwidthHz(center, tenths),
+            NotchSettings.bandwidthHz(center, hundredths),
         )
         val lowDb = BiquadCoefficients.magnitudeDb(sampleRate, low, coefficients)
         val highDb = BiquadCoefficients.magnitudeDb(sampleRate, high, coefficients)
@@ -96,13 +96,13 @@ class BiquadTest {
     @Test
     fun savedSettingsClampBackIntoRange() {
         val restored = NotchSettings(
-            bandwidthTenths = 40,
+            bandwidthHundredths = 400,
             bands = listOf(
                 NotchBand(enabled = true, frequencyHz = 12_000),
                 NotchBand(enabled = false, frequencyHz = 100),
             ),
         ).normalized()
-        assertEquals(NotchSettings.MAX_BANDWIDTH_TENTHS, restored.bandwidthTenths)
+        assertEquals(NotchSettings.MAX_BANDWIDTH_HUNDREDTHS, restored.bandwidthHundredths)
         assertEquals(4, restored.bands.size)
         assertEquals(true, restored.bands[0].enabled)
         assertEquals(NotchSettings.MAX_HZ, restored.bands[0].frequencyHz)
@@ -110,5 +110,19 @@ class BiquadTest {
         assertEquals(NotchSettings.MIN_HZ, restored.bands[1].frequencyHz)
         assertEquals(NotchSettings.DEFAULT_BANDS[2], restored.bands[2])
         assertEquals(NotchSettings.DEFAULT_BANDS[3], restored.bands[3])
+    }
+
+    @Test
+    fun quarterOctaveIsARealWidth() {
+        val at1k = NotchSettings.bandwidthHz(1_000.0, 25)
+        val factor = 2.0.pow(0.125) - 2.0.pow(-0.125)
+        assertEquals(1_000.0 * factor, at1k, 0.01)
+    }
+
+    @Test
+    fun legacyHalfOctaveStaysHalfAnOctave() {
+        assertEquals(50, NotchSettings.hundredthsFromLegacyTenths(5))
+        assertEquals(5, NotchSettings.legacyTenths(50))
+        assertEquals(3, NotchSettings.legacyTenths(25))
     }
 }
