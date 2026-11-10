@@ -92,6 +92,12 @@ class PlaylistTest {
         val albumAfter = withoutFirstTrack.entries[0] as PlaylistEntry.Album
         assertEquals(1, albumAfter.tracks.size)
         assertEquals("track2", albumAfter.tracks[0].uri)
+        assertEquals(1, playlist.removeTrack("album1", 9).entries.size)
+
+        val file = PlaylistEntry.SingleFile("file1", "content://file1", TrackTags(title = "File"))
+        val withFile = Playlist(listOf(file, album))
+        assertEquals(listOf("album1"), withFile.removeTrack("file1", 0).entries.map { it.id })
+        assertEquals(listOf("file1", "album1"), withFile.removeTrack("file1", 1).entries.map { it.id })
     }
 
     @Test

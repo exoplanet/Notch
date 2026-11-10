@@ -64,4 +64,44 @@ class PlaylistCodecTest {
         assertEquals(library, decoded)
         assertEquals(2, decoded.playlists.first().entries.size)
     }
+
+    @Test
+    fun decodeDropsBrokenEntriesAndClampsResume() {
+        val raw = """
+            {
+              "playlists": [
+                {"id": " ", "name": "Nope"},
+                {
+                  "id": "ok",
+                  "name": "  Kept  ",
+                  "entries": [
+                    {"type": "nope"},
+                    {"type": "file", "id": "", "uri": "content://x"},
+                    {"type": "file", "id": "blank", "uri": "  "},
+                    {"type": "file", "id": "f", "uri": "content://song", "track": 0, "title": "  Hi  "},
+                    {"type": "album", "id": "a", "treeUri": ""},
+                    {"type": "album", "id": "album", "treeUri": "content://tree", "title": " ", "tracks": [
+                      {"uri": " "},
+                      {"uri": "content://t", "fileName": "", "disc": 0, "track": -2}
+                    ]}
+                  ]
+                }
+              ],
+              "resume": {"playlistId": "ok", "mediaIndex": -4, "positionMs": -8}
+            }
+        """.trimIndent()
+        val decoded = PlaylistCodec.decode(raw)
+        assertEquals(listOf("ok"), decoded.playlists.map { it.id })
+        assertEquals("Kept", decoded.playlists.single().name)
+        val file = decoded.playlists.single().entries[0] as PlaylistEntry.SingleFile
+        assertEquals("Hi", file.metadata.title)
+        assertEquals(null, file.metadata.trackNumber)
+        val album = decoded.playlists.single().entries[1] as PlaylistEntry.Album
+        assertEquals("Album", album.title)
+        assertEquals(1, album.tracks.size)
+        assertEquals("audio", album.tracks.single().fileName)
+        assertEquals(null, album.tracks.single().discTag)
+        assertEquals(null, album.tracks.single().trackNumber)
+        assertEquals(ResumePoint("ok", 0, 0L), decoded.resume)
+    }
 }

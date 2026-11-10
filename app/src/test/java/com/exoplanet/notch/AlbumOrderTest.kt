@@ -95,6 +95,56 @@ class AlbumOrderTest {
         assertEquals(listOf("Bonus", "Live"), sorted.map { it.relativeFolder })
     }
 
+    @Test
+    fun albumRootPlaysAfterNumberedDiscsAndBeforeOtherFolders() {
+        val sorted = AlbumOrder.sort(
+            listOf(
+                track("live.flac", relativeFolder = "Live", trackNumber = 1),
+                track("root.flac", trackNumber = 1),
+                track("disc.flac", relativeFolder = "CD1", trackNumber = 1),
+            ),
+        )
+        assertEquals(listOf("disc.flac", "root.flac", "live.flac"), sorted.map { it.fileName })
+    }
+
+    @Test
+    fun discFoldersIgnoreZeroAndReadANestedOrBackslashPath() {
+        assertNull(AlbumOrder.discFromFolder("CD0"))
+        assertNull(AlbumOrder.discFromFolder("CD"))
+        assertEquals(2, AlbumOrder.discFromFolder("Artist/CD2"))
+        assertEquals(1, AlbumOrder.discFromFolder("CD1\\bonus"))
+        assertEquals(1, AlbumOrder.effectiveDisc(track("a.flac", relativeFolder = "CD9", discTag = 1)))
+    }
+
+    @Test
+    fun naturalOrderIgnoresLeadingZerosAndCaseAndKeepsTiesStable() {
+        assertEquals(0, AlbumOrder.naturalCompare("01 Title.flac", "1 title.FLAC"))
+        assertEquals(0, AlbumOrder.naturalCompare("Track.flac", "track.flac"))
+        val sorted = AlbumOrder.sort(
+            listOf(
+                track("01 Title.flac"),
+                track("1 title.FLAC"),
+                track("track10000000000000000000.flac"),
+                track("track2.flac"),
+            ),
+        )
+        assertEquals(
+            listOf("01 Title.flac", "1 title.FLAC", "track2.flac", "track10000000000000000000.flac"),
+            sorted.map { it.fileName },
+        )
+    }
+
+    @Test
+    fun parseCountRejectsZeroFractionsAndBlankHeads() {
+        assertEquals(12, TrackMetadataReader.parseCount("12"))
+        assertEquals(3, TrackMetadataReader.parseCount("03"))
+        assertEquals(1, TrackMetadataReader.parseCount("1/"))
+        assertNull(TrackMetadataReader.parseCount("0"))
+        assertNull(TrackMetadataReader.parseCount("-1"))
+        assertNull(TrackMetadataReader.parseCount("/12"))
+        assertNull(TrackMetadataReader.parseCount("1.5"))
+    }
+
     private fun track(
         fileName: String,
         relativeFolder: String = "",

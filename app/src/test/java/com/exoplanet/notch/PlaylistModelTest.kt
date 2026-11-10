@@ -87,6 +87,42 @@ class PlaylistModelTest {
         assertEquals(listOf("s1"), emptied.entries.map { it.id })
     }
 
+    @Test
+    fun locationAtSkipsAnUnavailableTrackInsideAnAlbum() {
+        val queue = Playlist(
+            listOf(
+                single("s1", "one"),
+                PlaylistEntry.Album(
+                    "album",
+                    "tree",
+                    "Album",
+                    listOf(
+                        albumTrack("a.flac"),
+                        albumTrack("b.flac").copy(unavailable = true),
+                        albumTrack("c.flac"),
+                    ),
+                ),
+                single("s2", "two"),
+            ),
+        )
+        assertEquals(MediaMove(1, 3, 2), queue.mediaMove(1, 2))
+        assertEquals(0, queue.locationAt(1)?.trackIndex)
+        assertEquals(2, queue.locationAt(2)?.trackIndex)
+        assertEquals("c.flac", queue.flatten()[2].title)
+        assertEquals(2, queue.flatten()[2].trackIndex)
+        assertEquals("s2", queue.locationAt(3)?.entryId)
+        assertNull(queue.locationAt(-1))
+    }
+
+    @Test
+    fun labelsClampAndBlankTitlesFallBack() {
+        assertEquals("1 / 3", Playlist.positionLabel(-4, 3))
+        assertEquals("3 / 3", Playlist.positionLabel(9, 3))
+        assertEquals("Song", Playlist.trackTitle("  Song  ", "ignored.flac"))
+        assertEquals("from-path.flac", Playlist.trackTitle("   ", "from-path.flac"))
+        assertEquals("Audio", Playlist.trackTitle(" ", " "))
+    }
+
     private fun single(id: String, title: String): PlaylistEntry.SingleFile {
         return PlaylistEntry.SingleFile(id, "uri://$id", TrackTags(title = title))
     }

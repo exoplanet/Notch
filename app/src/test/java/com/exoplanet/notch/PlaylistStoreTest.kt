@@ -114,6 +114,40 @@ class PlaylistStoreTest {
     }
 
     @Test
+    fun failedOrBlankScanKeepsTheCacheAndAThrowingReadFlagsTheTrack() {
+        val album = PlaylistEntry.Album(
+            id = "album",
+            treeUri = "content://tree",
+            title = "Night",
+            tracks = listOf(
+                track("content://t1", "One", disc = 1, number = 1),
+                track("", "Blank", disc = 1, number = 2),
+            ),
+        )
+        val thrown = PlaylistRefresh.refresh(listOf(album), scan = { error("unreadable") }) { true }
+        val afterThrow = thrown.single() as PlaylistEntry.Album
+        assertEquals(listOf("content://t1", ""), afterThrow.tracks.map { it.uri })
+        assertFalse(afterThrow.tracks[0].unavailable)
+        assertTrue(afterThrow.tracks[1].unavailable)
+
+        val blankTree = album.copy(treeUri = " ")
+        val kept = PlaylistRefresh.refresh(listOf(blankTree), scan = { error("should not scan") }) { true }
+        assertEquals(listOf("content://t1", ""), (kept.single() as PlaylistEntry.Album).tracks.map { it.uri })
+
+        val scanned = PlaylistRefresh.refresh(listOf(album), scan = { AlbumScanResult.Ok(emptyList()) }) {
+            throw IllegalStateException("grant")
+        }
+        assertTrue((scanned.single() as PlaylistEntry.Album).tracks.all { it.unavailable })
+    }
+
+    @Test
+    fun rememberIgnoresAnUnknownPlaylist() {
+        val library = SavedLibrary(playlists = listOf(SavedPlaylist("pl1", "Test", 1L, 2L, emptyList())))
+        assertSame(library, library.remember(ResumePoint("missing", 0, 0L)))
+        assertNull(library.commitPlaylist(" ", "Name", emptyList(), 3L))
+    }
+
+    @Test
     fun renameAndDeleteUpdateTheLibrary() {
         val first = saved("a", "Morning", created = 5, updated = 5, "content://a")
         val second = saved("b", "Evening", created = 6, updated = 6, "content://b")

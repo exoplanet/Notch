@@ -1,7 +1,3 @@
-Notch 1.6 matches a frequency in the app.
+Notch 1.7 checks an update before it opens the installer.
 
-Menu, then Match, plays a quiet sine or a narrow noise. Compare the octave below and above. The match stays put until you tap Keep. Write that frequency into a notch.
-
-Width steps by 0.05, from 0.10 to 1.00 octave, so 0.25 can be set. The number can also be typed.
-
-The APK is signed with the upload key.
+The download starts at this repository's GitHub release. GitHub's file hosts are accepted after that release redirects there. The file must be the Notch package, signed with the same upload key. Any other file is deleted, and Update says it is not a signed Notch update.
