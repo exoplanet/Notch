@@ -17,13 +17,15 @@ dependencyResolutionManagement {
 rootProject.name = "Notch"
 include(":app")
 
-// Android Gradle Plugin 9.4.1 pins these on the plugin classpath. The patched
-// releases fix the open Dependabot alerts. This classpath builds and signs the
-// APK; it is separate from the app's Guava Android constraint.
+// Android Gradle Plugin 9.4.1 requests Bouncy Castle 1.80.2 on the plugin
+// classpath (builder, apkzlib, sdk-common). That request is not strict.
+// 1.86 fixes CVE-2026-71891, which still affects 1.85. Gradle 9.6.1 also
+// embeds bcprov 1.84 in its own lib/plugins; this force does not replace that jar.
+// This classpath builds and signs the APK; it is separate from the app's Guava constraint.
 val patchedPluginClasspath = mapOf(
-    "org.bouncycastle:bcprov-jdk18on" to "1.85",
-    "org.bouncycastle:bcpkix-jdk18on" to "1.85",
-    "org.bouncycastle:bcutil-jdk18on" to "1.85",
+    "org.bouncycastle:bcprov-jdk18on" to "1.86",
+    "org.bouncycastle:bcpkix-jdk18on" to "1.86",
+    "org.bouncycastle:bcutil-jdk18on" to "1.86",
     "org.bitbucket.b_c:jose4j" to "0.9.6",
     "org.jdom:jdom2" to "2.0.6.1",
     "org.apache.commons:commons-lang3" to "3.18.0",
