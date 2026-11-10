@@ -32,7 +32,7 @@ class Playlist(
         val updated = entries.mapNotNull { entry ->
             if (entry.id != entryId) return@mapNotNull entry
             when (entry) {
-                is PlaylistEntry.SingleFile -> null
+                is PlaylistEntry.SingleFile -> if (trackIndex == 0) null else entry
                 is PlaylistEntry.Album -> {
                     if (trackIndex !in entry.tracks.indices) {
                         entry
@@ -86,16 +86,24 @@ class Playlist(
         if (mediaIndex < 0) return null
         var cursor = 0
         entries.forEachIndexed { entryIndex, entry ->
-            val count = entry.mediaCount
-            if (mediaIndex < cursor + count) {
-                return PlaylistLocation(
-                    entryId = entry.id,
-                    entryIndex = entryIndex,
-                    trackIndex = mediaIndex - cursor,
-                    mediaIndex = mediaIndex,
-                )
+            when (entry) {
+                is PlaylistEntry.SingleFile -> {
+                    if (entry.unavailable) return@forEachIndexed
+                    if (cursor == mediaIndex) {
+                        return PlaylistLocation(entry.id, entryIndex, 0, mediaIndex)
+                    }
+                    cursor += 1
+                }
+                is PlaylistEntry.Album -> {
+                    entry.tracks.forEachIndexed { trackIndex, track ->
+                        if (track.unavailable) return@forEachIndexed
+                        if (cursor == mediaIndex) {
+                            return PlaylistLocation(entry.id, entryIndex, trackIndex, mediaIndex)
+                        }
+                        cursor += 1
+                    }
+                }
             }
-            cursor += count
         }
         return null
     }

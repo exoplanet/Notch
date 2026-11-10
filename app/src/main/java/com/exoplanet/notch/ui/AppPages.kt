@@ -139,7 +139,7 @@ private fun UpdateBody() {
                 checking = false
                 status = "Opening the installer for Notch ${result.version}."
                 runCatching { GitHubUpdate.launchInstaller(context, file.getOrThrow()) }
-                    .onFailure { status = "Could not open the installer." }
+                    .onFailure { status = it.message ?: "Could not open the installer." }
             }
         }
     }

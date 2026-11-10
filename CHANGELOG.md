@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7
+
+Update checks the download before it opens the installer.
+
+- The download starts at this repository's GitHub release. GitHub's file hosts are accepted after that release redirects there.
+- The file must be package com.exoplanet.notch and signed with the upload key. Any other download is deleted. Update says the file is not a signed Notch update.
+
 ## 1.6
 
 Match a frequency in the app, and set a quarter-octave width.

@@ -113,6 +113,59 @@ class BiquadTest {
     }
 
     @Test
+    fun widthBelowTheMinimumAndExtraBandsAreDropped() {
+        val restored = NotchSettings(
+            bandwidthHundredths = 0,
+            bands = List(5) { NotchBand(enabled = true, frequencyHz = 7_000) },
+        ).normalized()
+        assertEquals(NotchSettings.MIN_BANDWIDTH_HUNDREDTHS, restored.bandwidthHundredths)
+        assertEquals(4, restored.bands.size)
+        assertTrue(restored.bands.all { it.enabled && it.frequencyHz == 7_000 })
+    }
+
+    @Test
+    fun legacyTenthsRoundAtTheHalfwayPoint() {
+        assertEquals(1, NotchSettings.legacyTenths(10))
+        assertEquals(1, NotchSettings.legacyTenths(14))
+        assertEquals(2, NotchSettings.legacyTenths(15))
+        assertEquals(10, NotchSettings.legacyTenths(100))
+        assertEquals(1, NotchSettings.legacyTenths(0))
+        assertEquals(
+            NotchSettings.bandwidthHz(1_000.0, 10),
+            NotchSettings.bandwidthHz(1_000.0, 1),
+            0.0,
+        )
+    }
+
+    @Test
+    fun disabledOrUnusableSampleRateIsAnIdentityFilter() {
+        val enabled = NotchBand(enabled = true, frequencyHz = 2_000)
+        assertEquals(
+            BiquadCoefficients.IDENTITY,
+            BiquadCoefficients.forBand(0, enabled, 50),
+        )
+        assertEquals(
+            BiquadCoefficients.IDENTITY,
+            BiquadCoefficients.notch(0, 2_000.0, 40.0),
+        )
+    }
+
+    @Test
+    fun channelStateResetForgetsEarlierSamples() {
+        val coeffs = BiquadCoefficients.notch(48_000, 2_000.0, 40.0)
+        val fresh = ChannelState()
+        val used = ChannelState()
+        used.process(1.0, coeffs.b0, coeffs.b1, coeffs.b2, coeffs.a1, coeffs.a2)
+        used.reset()
+        val input = 0.25
+        assertEquals(
+            fresh.process(input, coeffs.b0, coeffs.b1, coeffs.b2, coeffs.a1, coeffs.a2),
+            used.process(input, coeffs.b0, coeffs.b1, coeffs.b2, coeffs.a1, coeffs.a2),
+            0.0,
+        )
+    }
+
+    @Test
     fun quarterOctaveIsARealWidth() {
         val at1k = NotchSettings.bandwidthHz(1_000.0, 25)
         val factor = 2.0.pow(0.125) - 2.0.pow(-0.125)
